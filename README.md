@@ -32,10 +32,19 @@ Claude on Slack bridges the gap between Slack conversations and Claude Code's po
 2. **Configure environment**
    ```bash
    cp .env.example .env
-   # Edit .env with your actual tokens and API keys
+   # Edit .env with your actual tokens and working directory
    ```
 
-3. **Build and run**
+3. **Install as systemd service (recommended)**
+   ```bash
+   # Install as current user (for security)
+   sudo ./scripts/install.sh
+
+   # Or specify a different user
+   sudo CLAUDE_SERVICE_USER=youruser ./scripts/install.sh
+   ```
+
+4. **Manual build and run**
    ```bash
    go mod tidy
    go build -o slack-claude-bot ./cmd/slack-claude-bot
@@ -54,7 +63,7 @@ SLACK_SIGNING_SECRET=your-slack-signing-secret
 
 # Claude Code CLI configuration
 CLAUDE_CODE_PATH=claude
-ALLOWED_TOOLS=Read,Write,Bash,Grep,Glob,WebSearch
+ALLOWED_TOOLS=                    # Empty = all tools (full access)
 
 # Access control
 ALLOWED_USERS=user1@domain.com,user2@domain.com
@@ -64,8 +73,8 @@ ADMIN_USERS=admin@domain.com
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8080
 
-# Working directory
-WORKING_DIRECTORY=/tmp/claude-workspace
+# Working directory (set to your home directory for full system access)
+WORKING_DIRECTORY=/home/yourusername
 ```
 
 ## 📖 Usage

@@ -14,11 +14,12 @@ NC='\033[0m' # No Color
 
 # Configuration
 SERVICE_NAME="claude-on-slack"
-SERVICE_USER="claude-bot"
+# Default to current user if not specified
+SERVICE_USER="${CLAUDE_SERVICE_USER:-$(logname 2>/dev/null || whoami)}"
 INSTALL_DIR="/opt/claude-on-slack"
-CONFIG_DIR="/etc/claude-on-slack"
-LOG_DIR="/var/log/claude-on-slack"
-WORK_DIR="/var/lib/claude-on-slack"
+CONFIG_DIR="/home/$SERVICE_USER/.config/claude-on-slack"  # User config directory
+LOG_DIR="/home/$SERVICE_USER/.local/share/claude-on-slack/logs"  # User log directory
+WORK_DIR="/home/$SERVICE_USER"  # User's home directory
 
 # Print colored output
 print_status() {

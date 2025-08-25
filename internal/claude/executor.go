@@ -309,7 +309,12 @@ func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage str
 	// Use configured working directory instead of isolated workspace for full system access
 	workingDir := e.config.WorkingDirectory
 	if workingDir == "" {
-		workingDir = "/home/zero" // Default to user home for full access
+		// Default to user's home directory for full access
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			workingDir = homeDir
+		} else {
+			workingDir = "." // Fallback to current directory
+		}
 	}
 	
 	// Ensure working directory exists

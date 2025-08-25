@@ -14,11 +14,12 @@ NC='\033[0m' # No Color
 
 # Configuration
 SERVICE_NAME="claude-on-slack"
-SERVICE_USER="claude-bot"
+# Default to current user if not specified
+SERVICE_USER="${CLAUDE_SERVICE_USER:-$(logname 2>/dev/null || whoami)}"
 INSTALL_DIR="/opt/claude-on-slack"
-CONFIG_DIR="/etc/claude-on-slack"
-LOG_DIR="/var/log/claude-on-slack"
-WORK_DIR="/var/lib/claude-on-slack"
+CONFIG_DIR="/home/$SERVICE_USER/.config/claude-on-slack"  # User config directory
+LOG_DIR="/home/$SERVICE_USER/.local/share/claude-on-slack/logs"  # User log directory  
+WORK_DIR="/home/$SERVICE_USER"  # User's home directory
 
 # Print colored output
 print_status() {
@@ -75,15 +76,16 @@ check_prerequisites() {
     fi
 }
 
-# Create service user
-create_service_user() {
-    print_status "Creating service user '$SERVICE_USER'..."
+# Check service user exists
+check_service_user() {
+    print_status "Checking service user '$SERVICE_USER'..."
     
     if id "$SERVICE_USER" &>/dev/null; then
-        print_warning "User '$SERVICE_USER' already exists"
+        print_success "User '$SERVICE_USER' exists"
     else
-        useradd --system --no-create-home --shell /bin/false --home-dir "$WORK_DIR" "$SERVICE_USER"
-        print_success "Created service user '$SERVICE_USER'"
+        print_error "User '$SERVICE_USER' does not exist"
+        print_error "Please create the user first or change SERVICE_USER in this script"
+        exit 1
     fi
 }
 
@@ -96,18 +98,17 @@ create_directories() {
     chown root:root "$INSTALL_DIR"
     chmod 755 "$INSTALL_DIR"
     
-    # Create configuration directory
-    mkdir -p "$CONFIG_DIR"
-    chown root:$SERVICE_USER "$CONFIG_DIR"
-    chmod 750 "$CONFIG_DIR"
+    # Create configuration directory in user's home
+    sudo -u $SERVICE_USER mkdir -p "$CONFIG_DIR"
+    chown $SERVICE_USER:$SERVICE_USER "$CONFIG_DIR"
+    chmod 755 "$CONFIG_DIR"
     
-    # Create log directory
-    mkdir -p "$LOG_DIR"
+    # Create log directory in user's home
+    sudo -u $SERVICE_USER mkdir -p "$LOG_DIR"
     chown $SERVICE_USER:$SERVICE_USER "$LOG_DIR"
     chmod 755 "$LOG_DIR"
     
-    # Create working directory
-    mkdir -p "$WORK_DIR"
+    # Ensure working directory (user's home) has correct permissions
     chown $SERVICE_USER:$SERVICE_USER "$WORK_DIR"
     chmod 755 "$WORK_DIR"
     
@@ -148,8 +149,8 @@ copy_configuration() {
     
     # Copy .env.example to config directory
     if [[ -f "$PROJECT_DIR/.env.example" ]]; then
-        cp "$PROJECT_DIR/.env.example" "$CONFIG_DIR/claude-on-slack.env.example"
-        chown root:$SERVICE_USER "$CONFIG_DIR/claude-on-slack.env.example"
+        sudo -u $SERVICE_USER cp "$PROJECT_DIR/.env.example" "$CONFIG_DIR/claude-on-slack.env.example"
+        chown $SERVICE_USER:$SERVICE_USER "$CONFIG_DIR/claude-on-slack.env.example"
         chmod 640 "$CONFIG_DIR/claude-on-slack.env.example"
         print_success "Copied .env.example to $CONFIG_DIR/"
     fi
@@ -157,14 +158,14 @@ copy_configuration() {
     # Check if .env file exists in project directory and copy it
     if [[ -f "$PROJECT_DIR/.env" ]]; then
         print_status "Found existing .env file in project directory, copying it..."
-        cp "$PROJECT_DIR/.env" "$CONFIG_DIR/claude-on-slack.env"
-        chown root:$SERVICE_USER "$CONFIG_DIR/claude-on-slack.env"
+        sudo -u $SERVICE_USER cp "$PROJECT_DIR/.env" "$CONFIG_DIR/claude-on-slack.env"
+        chown $SERVICE_USER:$SERVICE_USER "$CONFIG_DIR/claude-on-slack.env"
         chmod 640 "$CONFIG_DIR/claude-on-slack.env"
         print_success "Copied existing .env to $CONFIG_DIR/claude-on-slack.env"
     # Create default environment file if it doesn't exist and no .env was copied
     elif [[ ! -f "$CONFIG_DIR/claude-on-slack.env" ]]; then
         print_status "Creating default environment file..."
-        cat > "$CONFIG_DIR/claude-on-slack.env" << 'EOF'
+        sudo -u $SERVICE_USER tee "$CONFIG_DIR/claude-on-slack.env" > /dev/null << 'EOF'
 # claude-on-slack Configuration
 # Copy from claude-on-slack.env.example and customize
 
@@ -203,7 +204,7 @@ HEALTH_CHECK_PATH=/health
 
 # Working Directory & Commands  
 # Full system access - set to your home directory
-WORKING_DIRECTORY=/home/zero
+WORKING_DIRECTORY=/home/$SERVICE_USER
 COMMAND_TIMEOUT=10m
 MAX_OUTPUT_LENGTH=50000
 # Minimal restrictions for personal use
@@ -214,7 +215,7 @@ LOG_LEVEL=info
 LOG_FORMAT=json
 ENABLE_DEBUG=false
 EOF
-        chown root:$SERVICE_USER "$CONFIG_DIR/claude-on-slack.env"
+        chown $SERVICE_USER:$SERVICE_USER "$CONFIG_DIR/claude-on-slack.env"
         chmod 640 "$CONFIG_DIR/claude-on-slack.env"
         print_success "Created default environment file"
     else
@@ -325,8 +326,13 @@ show_instructions() {
     echo "- Binary: $INSTALL_DIR/$SERVICE_NAME"
     echo "- Config: $CONFIG_DIR/claude-on-slack.env"
     echo "- Logs: $LOG_DIR/ (also in journalctl)"
-    echo "- Workspace: $WORK_DIR/workspace"
+    echo "- Working Dir: $WORK_DIR (zero's home)"
     echo "- Service: /etc/systemd/system/$SERVICE_NAME.service"
+    echo
+    print_status "Security Note:"
+    echo "- Service runs as user '$SERVICE_USER' (not root)"
+    echo "- For root operations, handle manually via remote access"
+    echo "- Claude has same permissions as user '$SERVICE_USER'"
 }
 
 # Main installation function
@@ -336,7 +342,7 @@ main() {
     
     check_root
     check_prerequisites
-    create_service_user
+    check_service_user
     create_directories
     build_application
     copy_configuration

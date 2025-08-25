@@ -79,7 +79,7 @@ func Load() (*Config, error) {
 		ServerPort:             8080,
 		ServerHost:             "0.0.0.0",
 		HealthCheckPath:        "/health",
-		WorkingDirectory:       "/home/zero", // Default to user home for full access
+		WorkingDirectory:       "", // Default to current directory - set in .env
 		CommandTimeout:         time.Minute * 5,
 		MaxOutputLength:        10000,
 	}

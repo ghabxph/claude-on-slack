@@ -110,7 +110,7 @@ def fibonacci(n):
 
 ### Project Structure
 
-```
+```text
 claude-on-slack/
 ├── cmd/
 │   └── slack-claude-bot/

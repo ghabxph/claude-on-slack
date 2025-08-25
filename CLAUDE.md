@@ -165,8 +165,25 @@
 
 ## 📝 Notes
 
-### Current Limitations
-- Session management could be more robust
+### Current Development Focus
+
+#### 1. Concurrent Multi-Session Support
+- **Current Status**: In development
+- **Priority**: High
+- **Implementation Plan**:
+  - Phase 1: Memory-based session management
+    - Concurrent session handling
+    - Latest session tracking and cleanup
+    - Per-session mode settings
+    - Session status monitoring (in-progress/completed)
+  - Phase 2: PostgreSQL integration
+    - Persistent session storage
+    - Enhanced session switching
+    - Historical session access
+    - Rich session metadata
+
+#### 2. Current Limitations
+- Session management needs concurrent support
 - Message queuing timing could be refined
 - Working directory tracking relies on config
 

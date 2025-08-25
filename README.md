@@ -51,7 +51,10 @@ Copy `.env.example` to `.env` and configure:
 SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
 SLACK_APP_TOKEN=xapp-your-slack-app-token  
 SLACK_SIGNING_SECRET=your-slack-signing-secret
-CLAUDE_API_KEY=sk-your-anthropic-api-key
+
+# Claude Code CLI configuration
+CLAUDE_CODE_PATH=claude
+ALLOWED_TOOLS=Read,Write,Bash,Grep,Glob,WebSearch
 
 # Access control
 ALLOWED_USERS=user1@domain.com,user2@domain.com

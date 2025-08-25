@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,56 +16,29 @@ import (
 	"github.com/ghabxph/claude-on-slack/internal/config"
 )
 
-// Executor handles Claude API communication and command execution
+// Executor handles Claude Code CLI execution
 type Executor struct {
-	config     *config.Config
-	logger     *zap.Logger
-	httpClient *http.Client
+	config        *config.Config
+	logger        *zap.Logger
+	claudeCodePath string
 }
 
-// Message represents a message in the conversation
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// ClaudeRequest represents the request to Claude API
-type ClaudeRequest struct {
-	Model     string    `json:"model"`
-	MaxTokens int       `json:"max_tokens"`
-	Messages  []Message `json:"messages"`
-	System    string    `json:"system,omitempty"`
-}
-
-// ClaudeResponse represents the response from Claude API
-type ClaudeResponse struct {
-	ID           string                 `json:"id"`
-	Type         string                 `json:"type"`
-	Role         string                 `json:"role"`
-	Content      []ClaudeContentBlock   `json:"content"`
-	Model        string                 `json:"model"`
-	StopReason   string                 `json:"stop_reason"`
-	StopSequence string                 `json:"stop_sequence"`
-	Usage        ClaudeUsage           `json:"usage"`
-	Error        *ClaudeError          `json:"error,omitempty"`
-}
-
-// ClaudeContentBlock represents a content block in Claude's response
-type ClaudeContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+// ClaudeCodeResponse represents the response from Claude Code CLI
+type ClaudeCodeResponse struct {
+	Type         string      `json:"type"`
+	Subtype      string      `json:"subtype"`
+	IsError      bool        `json:"is_error"`
+	Result       string      `json:"result"`
+	SessionID    string      `json:"session_id"`
+	TotalCostUSD float64     `json:"total_cost_usd"`
+	Usage        ClaudeUsage `json:"usage"`
+	Error        string      `json:"error,omitempty"`
 }
 
 // ClaudeUsage represents token usage information
 type ClaudeUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
-}
-
-// ClaudeError represents an error from Claude API
-type ClaudeError struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
 }
 
 // CommandResult represents the result of command execution
@@ -80,85 +51,110 @@ type CommandResult struct {
 	Timestamp  time.Time     `json:"timestamp"`
 }
 
-// NewExecutor creates a new Claude executor
-func NewExecutor(cfg *config.Config, logger *zap.Logger) *Executor {
-	return &Executor{
-		config: cfg,
-		logger: logger,
-		httpClient: &http.Client{
-			Timeout: cfg.ClaudeTimeout,
-		},
+// NewExecutor creates a new Claude Code executor
+func NewExecutor(cfg *config.Config, logger *zap.Logger) (*Executor, error) {
+	// Detect Claude Code CLI path
+	claudePath := "claude"
+	if envPath := os.Getenv("CLAUDE_CODE_PATH"); envPath != "" {
+		claudePath = envPath
 	}
+	
+	// Validate that Claude Code CLI is available
+	if _, err := exec.LookPath(claudePath); err != nil {
+		return nil, fmt.Errorf("claude code CLI not found in PATH: %w", err)
+	}
+	
+	// Test Claude Code CLI
+	cmd := exec.Command(claudePath, "--version")
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("claude code CLI not responding: %w", err)
+	}
+	
+	logger.Info("Claude Code CLI detected", zap.String("path", claudePath))
+	
+	return &Executor{
+		config:        cfg,
+		logger:        logger,
+		claudeCodePath: claudePath,
+	}, nil
 }
 
-// ExecuteClaudeRequest sends a request to Claude API
-func (e *Executor) ExecuteClaudeRequest(ctx context.Context, messages []Message, systemPrompt string) (*ClaudeResponse, error) {
-	request := ClaudeRequest{
-		Model:     e.config.ClaudeModel,
-		MaxTokens: e.config.ClaudeMaxTokens,
-		Messages:  messages,
-		System:    systemPrompt,
+// ExecuteClaudeCode executes a request using Claude Code CLI
+func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, sessionID string, workingDir string, allowedTools []string) (*ClaudeCodeResponse, error) {
+	// Prepare Claude Code CLI arguments
+	args := []string{
+		"--print",
+		"--output-format", "json",
 	}
-
-	reqBody, err := json.Marshal(request)
+	
+	// Add session ID if provided
+	if sessionID != "" {
+		args = append(args, "--session-id", sessionID)
+	}
+	
+	// Add allowed tools if specified
+	if len(allowedTools) > 0 {
+		args = append(args, "--allowedTools", strings.Join(allowedTools, ","))
+	}
+	
+	// Add system prompt for Slack bot context
+	systemPrompt := "You are Claude Code running in a Slack bot environment. Be helpful, concise, and format responses appropriately for Slack."
+	args = append(args, "--append-system-prompt", systemPrompt)
+	
+	// Create command with timeout
+	cmd := exec.CommandContext(ctx, e.claudeCodePath, args...)
+	cmd.Dir = workingDir
+	
+	// Set up stdin with user message
+	cmd.Stdin = strings.NewReader(userMessage)
+	
+	// Capture stdout and stderr
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	
+	e.logger.Info("Executing Claude Code CLI",
+		zap.String("session_id", sessionID),
+		zap.String("working_dir", workingDir),
+		zap.Strings("allowed_tools", allowedTools))
+	
+	// Execute command
+	start := time.Now()
+	err := cmd.Run()
+	duration := time.Since(start)
+	
 	if err != nil {
-		e.logger.Error("Failed to marshal request", zap.Error(err))
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		e.logger.Error("Claude Code CLI execution failed",
+			zap.Error(err),
+			zap.String("stderr", stderr.String()),
+			zap.Duration("duration", duration))
+		return nil, fmt.Errorf("claude code execution failed: %w", err)
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", e.config.ClaudeAPIURL, bytes.NewBuffer(reqBody))
-	if err != nil {
-		e.logger.Error("Failed to create request", zap.Error(err))
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	
+	// Parse JSON response
+	var response ClaudeCodeResponse
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		e.logger.Error("Failed to parse Claude Code response",
+			zap.Error(err),
+			zap.String("stdout", stdout.String()))
+		return nil, fmt.Errorf("failed to parse Claude Code response: %w", err)
 	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", e.config.ClaudeAPIKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	e.logger.Debug("Sending request to Claude API",
-		zap.String("model", request.Model),
-		zap.Int("max_tokens", request.MaxTokens),
-		zap.Int("message_count", len(messages)))
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		e.logger.Error("Failed to send request", zap.Error(err))
-		return nil, fmt.Errorf("failed to send request: %w", err)
+	
+	// Check for errors in response
+	if response.IsError {
+		e.logger.Error("Claude Code returned error",
+			zap.String("error", response.Error))
+		return nil, fmt.Errorf("claude code error: %s", response.Error)
 	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		e.logger.Error("Failed to read response", zap.Error(err))
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var claudeResp ClaudeResponse
-	if err := json.Unmarshal(respBody, &claudeResp); err != nil {
-		e.logger.Error("Failed to unmarshal response", zap.Error(err), zap.String("body", string(respBody)))
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		e.logger.Error("Claude API returned error",
-			zap.Int("status_code", resp.StatusCode),
-			zap.Any("error", claudeResp.Error))
-		return nil, fmt.Errorf("claude API error: %s", claudeResp.Error.Message)
-	}
-
-	if claudeResp.Error != nil {
-		e.logger.Error("Claude returned error in response", zap.Any("error", claudeResp.Error))
-		return nil, fmt.Errorf("claude error: %s", claudeResp.Error.Message)
-	}
-
-	e.logger.Debug("Received response from Claude",
-		zap.String("id", claudeResp.ID),
-		zap.String("stop_reason", claudeResp.StopReason),
-		zap.Int("input_tokens", claudeResp.Usage.InputTokens),
-		zap.Int("output_tokens", claudeResp.Usage.OutputTokens))
-
-	return &claudeResp, nil
+	
+	e.logger.Debug("Claude Code execution successful",
+		zap.String("session_id", response.SessionID),
+		zap.Float64("cost_usd", response.TotalCostUSD),
+		zap.Int("input_tokens", response.Usage.InputTokens),
+		zap.Int("output_tokens", response.Usage.OutputTokens),
+		zap.Duration("duration", duration))
+	
+	return &response, nil
 }
 
 // ExecuteCommand executes a system command with safety checks
@@ -307,51 +303,35 @@ Working directory: ` + e.config.WorkingDirectory + `
 Available commands are filtered for security.`
 }
 
-// ProcessClaudeCodeRequest processes a Claude Code request with command execution capabilities
-func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage string, conversationHistory []Message, userID string) (string, error) {
-	// Add system prompt
-	systemPrompt := e.GetClaudeCodeSystemPrompt()
-
-	// Prepare messages
-	messages := make([]Message, 0, len(conversationHistory)+1)
-	messages = append(messages, conversationHistory...)
-	messages = append(messages, Message{
-		Role:    "user",
-		Content: userMessage,
-	})
+// ProcessClaudeCodeRequest processes a request using Claude Code CLI
+func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage string, sessionID string, userID string, allowedTools []string) (string, float64, error) {
+	// Create or get user workspace
+	workspaceDir, err := e.CreateWorkspace(userID, sessionID)
+	if err != nil {
+		e.logger.Error("Failed to create workspace", zap.Error(err))
+		return "", 0, fmt.Errorf("failed to create workspace: %w", err)
+	}
 
 	e.logger.Info("Processing Claude Code request",
 		zap.String("user_id", userID),
-		zap.Int("history_length", len(conversationHistory)))
+		zap.String("session_id", sessionID),
+		zap.String("workspace", workspaceDir))
 
-	// Send request to Claude
-	response, err := e.ExecuteClaudeRequest(ctx, messages, systemPrompt)
+	// Execute Claude Code CLI
+	response, err := e.ExecuteClaudeCode(ctx, userMessage, sessionID, workspaceDir, allowedTools)
 	if err != nil {
-		e.logger.Error("Failed to get Claude response", zap.Error(err))
-		return "", fmt.Errorf("failed to get Claude response: %w", err)
+		e.logger.Error("Failed to execute Claude Code", zap.Error(err))
+		return "", 0, fmt.Errorf("failed to execute Claude Code: %w", err)
 	}
 
-	// Extract text from response
-	var responseText strings.Builder
-	for _, block := range response.Content {
-		if block.Type == "text" {
-			responseText.WriteString(block.Text)
-		}
-	}
+	e.logger.Info("Claude Code request completed",
+		zap.String("user_id", userID),
+		zap.String("session_id", response.SessionID),
+		zap.Float64("cost_usd", response.TotalCostUSD),
+		zap.Int("input_tokens", response.Usage.InputTokens),
+		zap.Int("output_tokens", response.Usage.OutputTokens))
 
-	result := responseText.String()
-
-	// Check if Claude wants to execute commands (basic detection)
-	if strings.Contains(result, "```bash") || strings.Contains(result, "```sh") || strings.Contains(result, "```shell") {
-		e.logger.Info("Claude response contains shell commands",
-			zap.String("user_id", userID))
-		
-		// For now, just return the response
-		// In a more advanced implementation, we could parse and execute the commands
-		// But that would require more sophisticated parsing and safety checks
-	}
-
-	return result, nil
+	return response.Result, response.TotalCostUSD, nil
 }
 
 // CreateWorkspace creates a dedicated workspace directory for a user session

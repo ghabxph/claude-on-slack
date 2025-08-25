@@ -15,12 +15,11 @@ type Config struct {
 	SlackAppToken      string
 	SlackSigningSecret string
 
-	// Claude configuration
-	ClaudeAPIKey     string
-	ClaudeAPIURL     string
-	ClaudeModel      string
-	ClaudeMaxTokens  int
+	// Claude Code configuration
+	ClaudeCodePath   string
 	ClaudeTimeout    time.Duration
+	AllowedTools     []string
+	DisallowedTools  []string
 
 	// Bot configuration
 	BotName         string
@@ -62,10 +61,10 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		// Default values
-		ClaudeAPIURL:           "https://api.anthropic.com/v1/messages",
-		ClaudeModel:            "claude-3-sonnet-20240229",
-		ClaudeMaxTokens:        4000,
-		ClaudeTimeout:          time.Minute * 2,
+		ClaudeCodePath:         "claude",
+		ClaudeTimeout:          time.Minute * 5,
+		AllowedTools:           []string{"Read", "Write", "Bash", "Grep", "Glob", "WebSearch"},
+		DisallowedTools:        []string{},
 		BotName:                "claude-bot",
 		BotDisplayName:         "Claude Bot",
 		CommandPrefix:          "!claude",
@@ -103,25 +102,17 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("SLACK_SIGNING_SECRET is required")
 	}
 
-	cfg.ClaudeAPIKey = getEnvRequired("CLAUDE_API_KEY")
-	if cfg.ClaudeAPIKey == "" {
-		return nil, fmt.Errorf("CLAUDE_API_KEY is required")
+	// Load optional Claude Code configuration
+	if val := os.Getenv("CLAUDE_CODE_PATH"); val != "" {
+		cfg.ClaudeCodePath = val
 	}
 
-	// Load optional environment variables with defaults
-	if val := os.Getenv("CLAUDE_API_URL"); val != "" {
-		cfg.ClaudeAPIURL = val
+	if val := os.Getenv("ALLOWED_TOOLS"); val != "" {
+		cfg.AllowedTools = strings.Split(val, ",")
 	}
 
-	if val := os.Getenv("CLAUDE_MODEL"); val != "" {
-		cfg.ClaudeModel = val
-	}
-
-	if val := os.Getenv("CLAUDE_MAX_TOKENS"); val != "" {
-		cfg.ClaudeMaxTokens, err = strconv.Atoi(val)
-		if err != nil {
-			return nil, fmt.Errorf("invalid CLAUDE_MAX_TOKENS: %v", err)
-		}
+	if val := os.Getenv("DISALLOWED_TOOLS"); val != "" {
+		cfg.DisallowedTools = strings.Split(val, ",")
 	}
 
 	if val := os.Getenv("CLAUDE_TIMEOUT"); val != "" {
@@ -267,11 +258,8 @@ func (c *Config) Validate() error {
 	if c.SlackSigningSecret == "" {
 		return fmt.Errorf("slack signing secret is required")
 	}
-	if c.ClaudeAPIKey == "" {
-		return fmt.Errorf("claude API key is required")
-	}
-	if c.ClaudeMaxTokens <= 0 {
-		return fmt.Errorf("claude max tokens must be positive")
+	if c.ClaudeCodePath == "" {
+		return fmt.Errorf("claude code path is required")
 	}
 	if c.SessionTimeout <= 0 {
 		return fmt.Errorf("session timeout must be positive")

@@ -48,7 +48,10 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 
 	// Initialize other services
 	authService := auth.NewService(cfg, logger)
-	claudeExecutor := claude.NewExecutor(cfg, logger)
+	claudeExecutor, err := claude.NewExecutor(cfg, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Claude executor: %w", err)
+	}
 	sessionManager := session.NewManager(cfg, logger, claudeExecutor)
 
 	service := &Service{
@@ -348,37 +351,45 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 		return fmt.Sprintf("⏱️ Rate limit exceeded. Try again in %v", remaining.Truncate(time.Second))
 	}
 
-	// Add user message to session
-	userMessage := claude.Message{
-		Role:    "user",
-		Content: text,
-	}
-
-	if err := s.sessionManager.AddMessageToSession(userSession.ID, userMessage); err != nil {
-		s.logger.Error("Failed to add message to session", zap.Error(err))
-		return "❌ Failed to add message to session"
-	}
-
 	// Send typing indicator
 	s.slackAPI.PostMessage(event.Channel, slack.MsgOptionText("🤔 Thinking...", false))
 
-	// Process with Claude
-	response, err := s.claudeExecutor.ProcessClaudeCodeRequest(ctx, text, userSession.History, event.User)
+	// Get allowed tools for this user
+	allowedTools := s.config.AllowedTools
+	if s.authService.IsUserAdmin(event.User) {
+		// Admin users get all tools
+		allowedTools = s.config.AllowedTools
+	} else {
+		// Filter out restricted tools for regular users
+		filteredTools := []string{}
+		for _, tool := range s.config.AllowedTools {
+			isDisallowed := false
+			for _, disallowed := range s.config.DisallowedTools {
+				if tool == disallowed {
+					isDisallowed = true
+					break
+				}
+			}
+			if !isDisallowed {
+				filteredTools = append(filteredTools, tool)
+			}
+		}
+		allowedTools = filteredTools
+	}
+
+	// Process with Claude Code CLI
+	response, cost, err := s.claudeExecutor.ProcessClaudeCodeRequest(ctx, text, userSession.ID, event.User, allowedTools)
 	if err != nil {
-		s.logger.Error("Claude processing failed", zap.Error(err))
-		return fmt.Sprintf("❌ Claude processing failed: %v", err)
+		s.logger.Error("Claude Code processing failed", zap.Error(err))
+		return fmt.Sprintf("❌ Claude Code processing failed: %v", err)
 	}
 
-	// Add assistant response to session
-	assistantMessage := claude.Message{
-		Role:    "assistant",
-		Content: response,
-	}
+	// Log cost for monitoring
+	s.logger.Info("Claude Code request completed",
+		zap.String("user_id", event.User),
+		zap.String("session_id", userSession.ID),
+		zap.Float64("cost_usd", cost))
 
-	if err := s.sessionManager.AddMessageToSession(userSession.ID, assistantMessage); err != nil {
-		s.logger.Error("Failed to add response to session", zap.Error(err))
-		// Don't return error here as we have the response
-	}
 
 	return response
 }

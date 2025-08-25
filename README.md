@@ -177,6 +177,11 @@ This project is open source and available under the [MIT License](LICENSE).
 
 ## 🔮 Upcoming Features
 
+### Image Support (Research)
+• Support for processing images uploaded to Slack channels (not yet implemented)
+• Research in progress for integrating Claude's image analysis capabilities
+• Will enable visual debugging, code review from screenshots, and more
+
 ### Code Edit Visualization
 We're working on showing code changes directly in chat:
 ```diff

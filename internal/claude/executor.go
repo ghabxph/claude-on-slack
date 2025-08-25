@@ -327,7 +327,7 @@ Available commands are filtered for security.`
 }
 
 // ProcessClaudeCodeRequest processes a request using Claude Code CLI
-func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage string, sessionID string, userID string, allowedTools []string, isNewSession bool, permissionMode config.PermissionMode) (string, string, float64, error) {
+func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage string, sessionID string, userID string, allowedTools []string, isNewSession bool, permissionMode config.PermissionMode) (string, string, float64, string, error) {
 	// Use configured working directory instead of isolated workspace for full system access
 	workingDir := e.config.WorkingDirectory
 	if workingDir == "" {
@@ -343,7 +343,7 @@ func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage str
 	// Ensure working directory exists
 	if err := os.MkdirAll(workingDir, 0755); err != nil {
 		e.logger.Error("Failed to create working directory", zap.Error(err))
-		return "", "", 0, fmt.Errorf("failed to create working directory: %w", err)
+		return "", "", 0, "", fmt.Errorf("failed to create working directory: %w", err)
 	}
 
 	e.logger.Info("Processing Claude Code request",
@@ -355,7 +355,7 @@ func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage str
 	response, err := e.ExecuteClaudeCode(ctx, userMessage, sessionID, workingDir, allowedTools, isNewSession, permissionMode)
 	if err != nil {
 		e.logger.Error("Failed to execute Claude Code", zap.Error(err))
-		return "", "", 0, fmt.Errorf("failed to execute Claude Code: %w", err)
+		return "", "", 0, "", fmt.Errorf("failed to execute Claude Code: %w", err)
 	}
 
 	e.logger.Info("Claude Code request completed",
@@ -365,7 +365,7 @@ func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage str
 		zap.Int("input_tokens", response.Usage.InputTokens),
 		zap.Int("output_tokens", response.Usage.OutputTokens))
 
-	return response.Result, response.SessionID, response.TotalCostUSD, nil
+	return response.Result, response.SessionID, response.TotalCostUSD, response.LatestResponse, nil
 }
 
 // CreateWorkspace creates a dedicated workspace directory for a user session

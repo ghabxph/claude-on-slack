@@ -494,14 +494,14 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 	}
 
 	// Process with Claude Code CLI
-	response, newClaudeSessionID, cost, err := s.claudeExecutor.ProcessClaudeCodeRequest(ctx, text, claudeSessionID, event.User, allowedTools, isNewSession, permMode)
+	response, newClaudeSessionID, cost, rawJSON, err := s.claudeExecutor.ProcessClaudeCodeRequest(ctx, text, claudeSessionID, event.User, allowedTools, isNewSession, permMode)
 	if err != nil {
 		s.logger.Error("Claude Code processing failed", zap.Error(err))
 		return fmt.Sprintf("❌ Claude Code processing failed: %v", err)
 	}
 	
-	// Store the latest response
-	if err := s.sessionManager.UpdateLatestResponse(userSession.ID, string(response)); err != nil {
+	// Store the latest response (raw JSON)
+	if err := s.sessionManager.UpdateLatestResponse(userSession.ID, rawJSON); err != nil {
 		s.logger.Error("Failed to update latest response", zap.Error(err))
 	}
 

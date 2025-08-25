@@ -69,6 +69,9 @@ ALLOWED_TOOLS=                    # Empty = all tools (full access)
 ALLOWED_USERS=user1@domain.com,user2@domain.com
 ADMIN_USERS=admin@domain.com
 
+# Auto-response channels (optional)
+AUTO_RESPONSE_CHANNELS=C1234567890  # Channel ID where bot responds to ALL messages
+
 # Server settings (for SSH tunnel setup)
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8080
@@ -81,8 +84,7 @@ WORKING_DIRECTORY=/home/yourusername
 
 ### Basic Commands
 
-Mention the bot in any channel or send direct messages:
-
+**In regular channels** - mention the bot:
 ```
 @claude-bot analyze this code snippet:
 
@@ -92,6 +94,18 @@ def fibonacci(n):
     return fibonacci(n-1) + fibonacci(n-2)
 
 @claude-bot create a dockerfile for a python web app
+```
+
+**In auto-response channels** - no mention needed:
+```
+analyze this code snippet:
+
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+
+create a dockerfile for a python web app
 ```
 
 ### Advanced Features

@@ -27,6 +27,7 @@ type Config struct {
 	CommandPrefix   string
 	AllowedChannels []string
 	AllowedUsers    []string
+	AutoResponseChannels []string  // Channels where bot responds to all messages (no mention needed)
 
 	// Session configuration
 	SessionTimeout    time.Duration
@@ -140,6 +141,10 @@ func Load() (*Config, error) {
 
 	if val := os.Getenv("ALLOWED_USERS"); val != "" {
 		cfg.AllowedUsers = strings.Split(val, ",")
+	}
+
+	if val := os.Getenv("AUTO_RESPONSE_CHANNELS"); val != "" {
+		cfg.AutoResponseChannels = strings.Split(val, ",")
 	}
 
 	if val := os.Getenv("SESSION_TIMEOUT"); val != "" {
@@ -298,6 +303,16 @@ func (c *Config) IsChannelAllowed(channelID string) bool {
 	
 	for _, allowedChannel := range c.AllowedChannels {
 		if allowedChannel == channelID {
+			return true
+		}
+	}
+	return false
+}
+
+// IsAutoResponseChannel checks if a channel should get automatic responses (no mention needed)
+func (c *Config) IsAutoResponseChannel(channelID string) bool {
+	for _, autoChannel := range c.AutoResponseChannels {
+		if autoChannel == channelID {
 			return true
 		}
 	}

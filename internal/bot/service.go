@@ -199,7 +199,11 @@ func (s *Service) handleMessageEvent(event *slackevents.MessageEvent) {
 
 	// Check if message starts with command prefix or mentions the bot
 	text := strings.TrimSpace(event.Text)
-	if !strings.HasPrefix(text, s.config.CommandPrefix) && !strings.Contains(text, fmt.Sprintf("<@%s>", s.botUserID)) {
+	isMentioned := strings.HasPrefix(text, s.config.CommandPrefix) || strings.Contains(text, fmt.Sprintf("<@%s>", s.botUserID))
+	isAutoResponseChannel := s.config.IsAutoResponseChannel(event.Channel)
+	
+	// Respond if bot is mentioned OR if it's an auto-response channel
+	if !isMentioned && !isAutoResponseChannel {
 		return
 	}
 

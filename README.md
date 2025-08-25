@@ -63,12 +63,11 @@ Mention the bot in any channel or send direct messages:
 
 ```
 @claude-bot analyze this code snippet:
-```python
+
 def fibonacci(n):
     if n <= 1:
         return n
     return fibonacci(n-1) + fibonacci(n-2)
-```
 
 @claude-bot create a dockerfile for a python web app
 ```
@@ -110,35 +109,33 @@ def fibonacci(n):
 
 ### Project Structure
 
-```text
-claude-on-slack/
-├── cmd/
-│   └── slack-claude-bot/
-│       └── main.go
-├── internal/
-│   ├── auth/
-│   │   └── service.go
-│   ├── bot/
-│   │   └── service.go
-│   ├── claude/
-│   │   └── executor.go
-│   ├── config/
-│   │   └── config.go
-│   └── session/
-│       └── manager.go
-├── configs/
-├── scripts/
-├── docs/
-│   └── examples/
-├── tests/
-│   ├── unit/
-│   └── integration/
-├── .env.example
-├── go.mod
-├── go.sum
-├── LICENSE
-└── README.md
-```
+    claude-on-slack/
+    ├── cmd/
+    │   └── slack-claude-bot/
+    │       └── main.go
+    ├── internal/
+    │   ├── auth/
+    │   │   └── service.go
+    │   ├── bot/
+    │   │   └── service.go
+    │   ├── claude/
+    │   │   └── executor.go
+    │   ├── config/
+    │   │   └── config.go
+    │   └── session/
+    │       └── manager.go
+    ├── configs/
+    ├── scripts/
+    ├── docs/
+    │   └── examples/
+    ├── tests/
+    │   ├── unit/
+    │   └── integration/
+    ├── .env.example
+    ├── go.mod
+    ├── go.sum
+    ├── LICENSE
+    └── README.md
 
 ### Building
 

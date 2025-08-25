@@ -111,26 +111,33 @@ def fibonacci(n):
 ### Project Structure
 
 ```
-├── cmd/slack-claude-bot/     # Main application entry point
-│   └── main.go               # Application entry point with HTTP server
-├── internal/                 # Core application modules
-│   ├── auth/                 # Authentication & authorization
-│   │   └── service.go        # User permissions and access control
-│   ├── bot/                  # Slack bot logic  
-│   │   └── service.go        # Slack event handling and message processing
-│   ├── claude/              # Claude Code executor
-│   │   └── executor.go       # Claude Code CLI wrapper and execution
-│   ├── config/              # Configuration management
-│   │   └── config.go         # Environment variable loading and validation
-│   └── session/             # Session management
-│       └── manager.go        # User session persistence and context
-├── configs/                 # Configuration files and templates
-├── scripts/                 # Installation and deployment scripts  
-├── docs/                    # Documentation and guides
-│   └── examples/            # Usage examples and integration guides
-└── tests/                   # Test suites
-    ├── unit/                # Unit tests
-    └── integration/         # Integration tests
+claude-on-slack/
+├── cmd/
+│   └── slack-claude-bot/
+│       └── main.go
+├── internal/
+│   ├── auth/
+│   │   └── service.go
+│   ├── bot/
+│   │   └── service.go
+│   ├── claude/
+│   │   └── executor.go
+│   ├── config/
+│   │   └── config.go
+│   └── session/
+│       └── manager.go
+├── configs/
+├── scripts/
+├── docs/
+│   └── examples/
+├── tests/
+│   ├── unit/
+│   └── integration/
+├── .env.example
+├── go.mod
+├── go.sum
+├── LICENSE
+└── README.md
 ```
 
 ### Building

@@ -16,6 +16,7 @@ import (
 	"github.com/ghabxph/claude-on-slack/internal/config"
 )
 
+
 // Executor handles Claude Code CLI execution
 type Executor struct {
 	config        *config.Config
@@ -33,12 +34,20 @@ type ClaudeCodeResponse struct {
 	TotalCostUSD float64     `json:"total_cost_usd"`
 	Usage        ClaudeUsage `json:"usage"`
 	Error        string      `json:"error,omitempty"`
+	LatestResponse string    `json:"-"` // Raw JSON response
 }
 
 // ClaudeUsage represents token usage information
 type ClaudeUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+}
+
+// Message represents a conversation message
+type Message struct {
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // CommandResult represents the result of command execution
@@ -80,16 +89,21 @@ func NewExecutor(cfg *config.Config, logger *zap.Logger) (*Executor, error) {
 }
 
 // ExecuteClaudeCode executes a request using Claude Code CLI
-func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, sessionID string, workingDir string, allowedTools []string) (*ClaudeCodeResponse, error) {
+func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, sessionID string, workingDir string, allowedTools []string, isNewSession bool, permissionMode config.PermissionMode) (*ClaudeCodeResponse, error) {
 	// Prepare Claude Code CLI arguments
 	args := []string{
 		"--print",
 		"--output-format", "json",
+		"--model", "claude-3-5-sonnet-20241022",
 	}
 	
-	// Add session ID if provided
+	// Add session flag based on whether it's a new session or continuation
 	if sessionID != "" {
-		args = append(args, "--session-id", sessionID)
+		if isNewSession {
+			args = append(args, "--session-id", sessionID)
+		} else {
+			args = append(args, "--resume", sessionID)
+		}
 	}
 	
 	// Add allowed tools if specified (empty means all tools available)
@@ -97,6 +111,9 @@ func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, se
 		args = append(args, "--allowedTools", strings.Join(allowedTools, ","))
 	}
 	// If allowedTools is empty, don't add --allowedTools flag = Claude Code uses all tools
+	
+	// Add permission mode
+	args = append(args, "--permission-mode", string(permissionMode))
 	
 	// Add system prompt for Slack bot context
 	systemPrompt := "You are Claude Code running in a Slack bot environment. Be helpful, concise, and format responses appropriately for Slack."
@@ -134,12 +151,16 @@ func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, se
 	
 	// Parse JSON response
 	var response ClaudeCodeResponse
-	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+	responseBytes := stdout.Bytes()
+	if err := json.Unmarshal(responseBytes, &response); err != nil {
 		e.logger.Error("Failed to parse Claude Code response",
 			zap.Error(err),
 			zap.String("stdout", stdout.String()))
 		return nil, fmt.Errorf("failed to parse Claude Code response: %w", err)
 	}
+	
+	// Save raw response
+	response.LatestResponse = string(responseBytes)
 	
 	// Check for errors in response
 	if response.IsError {
@@ -193,7 +214,8 @@ func (e *Executor) ExecuteCommand(ctx context.Context, command string, workingDi
 
 	// Parse command - handle shell commands properly
 	var cmd *exec.Cmd
-	if strings.Contains(command, "|") || strings.Contains(command, "&&") || strings.Contains(command, "||") || strings.Contains(command, ";") {
+	if strings.Contains(command, "|") || strings.Contains(command, "&&") || 
+		strings.Contains(command, "||") || strings.Contains(command, ";") {
 		// Complex shell command
 		cmd = exec.CommandContext(cmdCtx, "bash", "-c", command)
 	} else {
@@ -305,12 +327,13 @@ Available commands are filtered for security.`
 }
 
 // ProcessClaudeCodeRequest processes a request using Claude Code CLI
-func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage string, sessionID string, userID string, allowedTools []string) (string, float64, error) {
+func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage string, sessionID string, userID string, allowedTools []string, isNewSession bool, permissionMode config.PermissionMode) (string, string, float64, error) {
 	// Use configured working directory instead of isolated workspace for full system access
 	workingDir := e.config.WorkingDirectory
 	if workingDir == "" {
 		// Default to user's home directory for full access
-		if homeDir, err := os.UserHomeDir(); err == nil {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
 			workingDir = homeDir
 		} else {
 			workingDir = "." // Fallback to current directory
@@ -320,7 +343,7 @@ func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage str
 	// Ensure working directory exists
 	if err := os.MkdirAll(workingDir, 0755); err != nil {
 		e.logger.Error("Failed to create working directory", zap.Error(err))
-		return "", 0, fmt.Errorf("failed to create working directory: %w", err)
+		return "", "", 0, fmt.Errorf("failed to create working directory: %w", err)
 	}
 
 	e.logger.Info("Processing Claude Code request",
@@ -329,10 +352,10 @@ func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage str
 		zap.String("working_dir", workingDir))
 
 	// Execute Claude Code CLI
-	response, err := e.ExecuteClaudeCode(ctx, userMessage, sessionID, workingDir, allowedTools)
+	response, err := e.ExecuteClaudeCode(ctx, userMessage, sessionID, workingDir, allowedTools, isNewSession, permissionMode)
 	if err != nil {
 		e.logger.Error("Failed to execute Claude Code", zap.Error(err))
-		return "", 0, fmt.Errorf("failed to execute Claude Code: %w", err)
+		return "", "", 0, fmt.Errorf("failed to execute Claude Code: %w", err)
 	}
 
 	e.logger.Info("Claude Code request completed",
@@ -342,7 +365,7 @@ func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage str
 		zap.Int("input_tokens", response.Usage.InputTokens),
 		zap.Int("output_tokens", response.Usage.OutputTokens))
 
-	return response.Result, response.TotalCostUSD, nil
+	return response.Result, response.SessionID, response.TotalCostUSD, nil
 }
 
 // CreateWorkspace creates a dedicated workspace directory for a user session

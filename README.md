@@ -1,16 +1,16 @@
 # Claude on Slack
 
-A Slack bot that enables non-interactive execution of Claude Code commands directly in Slack channels, providing seamless AI assistance for development teams.
+A Slack bot that enables natural language interaction with Claude Code directly in Slack channels, providing seamless AI assistance for development teams.
 
 ## 🎯 Overview
 
 Claude on Slack bridges the gap between Slack conversations and Claude Code's powerful AI capabilities, allowing teams to:
 
-- Execute Claude Code commands directly from Slack messages
-- Maintain conversation context across multiple interactions  
+- Have natural conversations with Claude without command parsing
+- Maintain session context across multiple interactions  
 - Collaborate on code analysis, debugging, and development tasks
 - Access Claude's file operations, code generation, and analysis tools
-- Manage permissions and security controls for team usage
+- Control permissions and access levels through slash commands
 
 ## 🚀 Quick Start
 
@@ -18,7 +18,6 @@ Claude on Slack bridges the gap between Slack conversations and Claude Code's po
 
 - [Claude Code](https://github.com/anthropics/claude-code) installed and configured
 - Slack workspace with bot creation permissions
-- Anthropic API key with Claude access
 - Go 1.21+ for building the service
 
 ### Installation
@@ -82,201 +81,129 @@ WORKING_DIRECTORY=/home/yourusername
 
 ## 📖 Usage
 
-### Basic Commands
+### Basic Interaction
 
-**In regular channels** - mention the bot:
+Just talk naturally to Claude! No special commands or formatting needed:
+
 ```
-@claude-bot analyze this code snippet:
+@claude-bot Can you help me optimize this code?
 
 def fibonacci(n):
     if n <= 1:
         return n
     return fibonacci(n-1) + fibonacci(n-2)
 
-@claude-bot create a dockerfile for a python web app
+@claude-bot Can you create a dockerfile for a python web app?
 ```
 
-**In auto-response channels** - no mention needed:
-```
-analyze this code snippet:
+### Slash Commands
 
-def fibonacci(n):
-    if n <= 1:
-        return n
-    return fibonacci(n-1) + fibonacci(n-2)
+#### Session Management
+- `/session` - Show current session info and help
+- `/session <claude-session-id>` - Switch to specific session
+- `/session new` - Start fresh conversation
 
-create a dockerfile for a python web app
-```
+#### Permission Control
+- `/permission` - Show current permission mode and help
+- `/permission default` - Standard permissions with prompts
+- `/permission acceptEdits` - Auto-accept file edits
+- `/permission bypassPermissions` - Bypass permission checks
+- `/permission plan` - Planning mode, won't execute actions
 
 ### Advanced Features
 
+- **Natural Language Processing**: Just chat normally, no command parsing
 - **Session Continuity**: Conversations maintain context across messages
-- **File Operations**: Upload files for analysis or request generated files
-- **Tool Control**: Granular permissions for different tools and operations
-- **Multi-step Workflows**: Complex tasks broken down across multiple interactions
+- **Message Queuing**: Multiple rapid messages get combined intelligently
+- **Working Directory**: Current directory shown in responses
+- **Permission Modes**: Control Claude's behavior with slash commands
 
 ## 🏗️ Architecture
 
-```
-[Slack User] → [Slack API] → [Bot Service] → [Claude Code CLI] → [Response]
-```
-
 ### Core Components
 
-- **Slack Bot Service**: Go-based service handling Slack events
-- **Claude Code Wrapper**: Secure execution of Claude Code commands
-- **Session Manager**: Maintains conversation context per user
-- **Security Layer**: Authentication, authorization, and command filtering
+- **Slack Integration**: 
+  - Events API support
+  - Slash command handling
+  - Message queueing system
+  
+- **Session Management**:
+  - Persistent conversations
+  - Manual session control
+  - Working directory tracking
+
+- **Permission System**:
+  - Multiple permission modes
+  - Automatic mode reset
+  - Fine-grained control
+
+- **Response Handling**:
+  - Slack-friendly formatting
+  - Progress indicators
+  - Directory tracking
 
 ## 🔐 Security
 
-### Access Control
-- User allowlisting and role-based permissions
-- Channel restrictions and tool access controls
-- Session isolation and working directory management
-
-### Safety Features
-- Command sanitization and filtering
-- Cost limits and rate limiting
-- Comprehensive audit logging
-- Timeout protection for long-running operations
+- User authentication via Slack
+- Signature verification for all requests
+- Permission mode system for access control
+- Working directory isolation
+- Rate limiting and timeout protection
 
 ## 🛠️ Development
 
-### Project Structure
-
-    claude-on-slack/
-    ├── cmd/
-    │   └── slack-claude-bot/
-    │       └── main.go
-    ├── internal/
-    │   ├── auth/
-    │   │   └── service.go
-    │   ├── bot/
-    │   │   └── service.go
-    │   ├── claude/
-    │   │   └── executor.go
-    │   ├── config/
-    │   │   └── config.go
-    │   └── session/
-    │       └── manager.go
-    ├── configs/
-    ├── scripts/
-    ├── docs/
-    │   └── examples/
-    ├── tests/
-    │   ├── unit/
-    │   └── integration/
-    ├── .env.example
-    ├── go.mod
-    ├── go.sum
-    ├── LICENSE
-    └── README.md
-
 ### Building
-
 ```bash
-# Build for current platform
 go build -o slack-claude-bot ./cmd/slack-claude-bot
-
-# Cross-compile for Linux
-GOOS=linux GOARCH=amd64 go build -o slack-claude-bot-linux ./cmd/slack-claude-bot
 ```
 
-### Testing
-
+### Redeploying
 ```bash
-go test ./...
+./scripts/redeploy.sh
 ```
 
-## 📦 Deployment
-
-### SystemD Service
-
-For production deployment on Linux:
-
-1. **Copy binary to `/opt/slack-claude-bot/`**
-   ```bash
-   sudo mkdir -p /opt/slack-claude-bot
-   sudo cp slack-claude-bot /opt/slack-claude-bot/
-   sudo chmod +x /opt/slack-claude-bot/slack-claude-bot
-   ```
-
-2. **Configure environment in `/opt/slack-claude-bot/.env`**
-   ```bash
-   sudo cp .env.example /opt/slack-claude-bot/.env
-   sudo nano /opt/slack-claude-bot/.env  # Edit with your actual values
-   ```
-
-3. **Create service user**
-   ```bash
-   sudo useradd --system --no-create-home --shell /bin/false slack-claude-bot
-   sudo chown -R slack-claude-bot:slack-claude-bot /opt/slack-claude-bot
-   ```
-
-4. **Install systemd service**
-   ```bash
-   sudo cp configs/slack-claude-bot.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable slack-claude-bot.service
-   sudo systemctl start slack-claude-bot
-   ```
-
-### Docker
-
-```bash
-docker build -t claude-on-slack .
-docker run -d --env-file .env --name claude-bot claude-on-slack
-```
-
-## 📊 Monitoring
-
-### Health Check Endpoints
-- **Health check**: `http://localhost:8081/health` - Service health status
-- **Metrics**: `http://localhost:8081/metrics` - Basic service information
-
-### Logging
-- **Structured JSON logging** for production environments
-- **Console logging** for development  
-- **Comprehensive audit trail** of all user commands and responses
-- **Cost tracking** and usage monitoring per user
-
-### Service Monitoring
+### Monitoring
 ```bash
 # Check service status
 sudo systemctl status slack-claude-bot
 
 # View real-time logs
 sudo journalctl -u slack-claude-bot -f
-
-# Check health endpoint
-curl http://localhost:8081/health
 ```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
 
 ## 📄 License
 
 This project is open source and available under the [MIT License](LICENSE).
 
+## 🔮 Upcoming Features
+
+### Code Edit Visualization
+We're working on showing code changes directly in chat:
+```diff
+# Example future output:
+File: src/utils.ts:45
+- function getData(id: string): Promise<Data> {
++ async function getData(id: string): Promise<Data | null> {
+    const result = await db.query('SELECT * FROM data WHERE id = ?', [id]);
+-   return result[0];
++   return result[0] || null;
+  }
+```
+
+This will help you:
+- See exactly what Claude changed
+- Track file and line locations
+- Understand the context of changes
+- Review changes before accepting them
+
+Check `CLAUDE.md` for more planned features!
+
 ## 🆘 Support
 
-- **Documentation**: Check the [docs/](docs/) directory for detailed guides
-- **Issues**: Report bugs and feature requests via [GitHub Issues](https://github.com/ghabxph/claude-on-slack/issues)
-- **Discussions**: Join community discussions in [GitHub Discussions](https://github.com/ghabxph/claude-on-slack/discussions)
-
-## 🔗 Related Projects
-
-- [Claude Code](https://github.com/anthropics/claude-code) - The AI-powered coding assistant
-- [Anthropic API](https://docs.anthropic.com/) - Official Anthropic API documentation
-- [Slack API](https://api.slack.com/) - Slack platform documentation
+- Check `CLAUDE.md` for detailed feature list and roadmap
+- Report issues via [GitHub Issues](https://github.com/ghabxph/claude-on-slack/issues)
+- Join discussions in [GitHub Discussions](https://github.com/ghabxph/claude-on-slack/discussions)
 
 ---
 
-Built with ❤️ for development teams who want AI assistance directly in their Slack workflow.
+Built with ❤️ for development teams who want natural AI assistance in their Slack workflow.

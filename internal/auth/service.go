@@ -1,7 +1,12 @@
 package auth
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -466,9 +471,41 @@ func (s *Service) CleanupExpiredEntries() {
 	}
 }
 
-// ValidateSlackSignature validates Slack request signature (placeholder)
+// ValidateSlackSignature validates Slack request signature using HMAC SHA256
 func (s *Service) ValidateSlackSignature(timestamp, signature, body string) bool {
-	// TODO: Implement actual Slack signature validation
-	// This is a placeholder implementation
-	return true
+	// Early validation
+	if timestamp == "" || signature == "" || body == "" || s.config.SlackSigningSecret == "" {
+		s.logger.Warn("Invalid parameters for signature validation",
+			zap.Bool("has_timestamp", timestamp != ""),
+			zap.Bool("has_signature", signature != ""),
+			zap.Bool("has_body", body != ""),
+			zap.Bool("has_secret", s.config.SlackSigningSecret != ""))
+		return false
+	}
+
+	// Check if signature is too old (5 minutes)
+	ts, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		s.logger.Warn("Failed to parse timestamp", zap.Error(err))
+		return false
+	}
+	
+	now := time.Now().Unix()
+	if math.Abs(float64(now - ts)) > 300 {
+		s.logger.Warn("Signature timestamp too old",
+			zap.Int64("timestamp", ts),
+			zap.Int64("now", now))
+		return false
+	}
+
+	// Create base string by combining version, timestamp and body
+	baseString := fmt.Sprintf("v0:%s:%s", timestamp, body)
+
+	// Create HMAC SHA256 hash using signing secret
+	hash := hmac.New(sha256.New, []byte(s.config.SlackSigningSecret))
+	hash.Write([]byte(baseString))
+
+	// Compare signatures using constant-time comparison
+	expectedSignature := fmt.Sprintf("v0=%s", hex.EncodeToString(hash.Sum(nil)))
+	return hmac.Equal([]byte(signature), []byte(expectedSignature))
 }

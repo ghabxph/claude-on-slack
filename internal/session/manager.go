@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -13,6 +12,13 @@ import (
 	"github.com/ghabxph/claude-on-slack/internal/claude"
 )
 
+// MessageQueue tracks queued messages while processing
+type MessageQueue struct {
+	Messages     []string  `json:"messages"`      // Queued messages
+	LastUpdate   time.Time `json:"last_update"`   // Time of last message
+	IsProcessing bool      `json:"is_processing"` // Whether Claude is processing
+}
+
 // Session represents a conversation session
 type Session struct {
 	ID            string                 `json:"id"`
@@ -21,12 +27,18 @@ type Session struct {
 	CreatedAt     time.Time              `json:"created_at"`
 	LastActivity  time.Time              `json:"last_activity"`
 	MessageCount  int                    `json:"message_count"`
-	WorkspaceDir  string                 `json:"workspace_dir"`
-	History       []claude.Message       `json:"history"`
+	WorkspaceDir    string                 `json:"workspace_dir"`
+	CurrentWorkDir  string                 `json:"current_work_dir"` // Current working directory from Claude
+	History         []claude.Message       `json:"history"`
 	Context       map[string]interface{} `json:"context"`
 	IsActive      bool                   `json:"is_active"`
 	TokensUsed    int                    `json:"tokens_used"`
 	RateLimitInfo *RateLimitInfo         `json:"rate_limit_info"`
+	ExecutionMutex  sync.Mutex             `json:"-"` // Prevents concurrent executions within same session
+	ClaudeSessionID string                 `json:"claude_session_id"` // Current Claude Code session ID
+	MessageQueue    *MessageQueue          `json:"message_queue"`     // Queue for combining messages
+	PermissionMode  config.PermissionMode  `json:"permission_mode"`   // Current Claude permission mode
+	LatestResponse  string                 `json:"latest_response"`   // Latest raw JSON response from Claude
 }
 
 // RateLimitInfo tracks rate limiting for a session
@@ -131,6 +143,11 @@ func (m *Manager) CreateSession(userID, channelID string) (*Session, error) {
 		RateLimitInfo: &RateLimitInfo{
 			WindowStart: time.Now(),
 		},
+		MessageQueue: &MessageQueue{
+			Messages: make([]string, 0),
+		},
+		PermissionMode: config.PermissionModeDefault,
+		LatestResponse: "",
 	}
 
 	// Store session
@@ -424,4 +441,145 @@ func (m *Manager) ListUserSessions(userID string) string {
 	}
 
 	return result
+}
+
+// QueueMessage adds a message to the queue if processing, or returns false if ready to process
+func (m *Manager) QueueMessage(sessionID string, message string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return false, fmt.Errorf("session %s not found", sessionID)
+	}
+
+	if session.MessageQueue == nil {
+		session.MessageQueue = &MessageQueue{
+			Messages: make([]string, 0),
+		}
+	}
+
+	// If processing, queue the message
+	if session.MessageQueue.IsProcessing {
+		session.MessageQueue.Messages = append(session.MessageQueue.Messages, message)
+		session.MessageQueue.LastUpdate = time.Now()
+		return true, nil
+	}
+
+	// Not processing, ready to handle message
+	return false, nil
+}
+
+// SetProcessing marks a session as processing or not
+func (m *Manager) SetProcessing(sessionID string, processing bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+
+	if session.MessageQueue == nil {
+		session.MessageQueue = &MessageQueue{
+			Messages: make([]string, 0),
+		}
+	}
+
+	session.MessageQueue.IsProcessing = processing
+	return nil
+}
+
+// GetQueuedMessages gets and clears the message queue
+func (m *Manager) GetQueuedMessages(sessionID string) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return nil, fmt.Errorf("session %s not found", sessionID)
+	}
+
+	if session.MessageQueue == nil || len(session.MessageQueue.Messages) == 0 {
+		return nil, nil
+	}
+
+	messages := session.MessageQueue.Messages
+	session.MessageQueue.Messages = make([]string, 0)
+	return messages, nil
+}
+
+// UpdateCurrentWorkDir updates the current working directory
+func (m *Manager) UpdateCurrentWorkDir(sessionID string, workDir string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+
+	session.CurrentWorkDir = workDir
+	return nil
+}
+
+// SetPermissionMode sets the permission mode for a session
+func (m *Manager) SetPermissionMode(sessionID string, mode config.PermissionMode) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+
+	session.PermissionMode = mode
+	return nil
+}
+
+// UpdateLatestResponse updates the latest response for a session
+func (m *Manager) UpdateLatestResponse(sessionID string, response string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+
+	session.LatestResponse = response
+	return nil
+}
+
+// IsProcessing checks if a session is currently processing
+func (m *Manager) IsProcessing(sessionID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return false
+	}
+
+	if session.MessageQueue == nil {
+		return false
+	}
+
+	return session.MessageQueue.IsProcessing
+}
+
+// GetPermissionMode gets the permission mode for a session
+func (m *Manager) GetPermissionMode(sessionID string) (config.PermissionMode, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return "", fmt.Errorf("session %s not found", sessionID)
+	}
+
+	if session.PermissionMode == "" {
+		return config.PermissionModeDefault, nil
+	}
+	return session.PermissionMode, nil
 }

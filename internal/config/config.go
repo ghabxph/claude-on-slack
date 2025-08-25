@@ -8,6 +8,16 @@ import (
 	"time"
 )
 
+// PermissionMode defines Claude's permission level
+type PermissionMode string
+
+const (
+	PermissionModeDefault         PermissionMode = "default"
+	PermissionModeAcceptEdits    PermissionMode = "acceptEdits"
+	PermissionModeBypassPerms    PermissionMode = "bypassPermissions"
+	PermissionModePlan           PermissionMode = "plan"
+)
+
 // Config holds all configuration for the Claude on Slack bot
 type Config struct {
 	// Slack configuration

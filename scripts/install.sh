@@ -178,7 +178,8 @@ CLAUDE_CODE_PATH=claude
 CLAUDE_TIMEOUT=5m
 
 # Claude Code Tool Configuration
-ALLOWED_TOOLS=Read,Write,Bash,Grep,Glob,WebSearch
+# Empty = all tools available for full system access
+ALLOWED_TOOLS=
 DISALLOWED_TOOLS=
 
 # Bot Configuration
@@ -200,11 +201,13 @@ SERVER_HOST=0.0.0.0
 SERVER_PORT=8080
 HEALTH_CHECK_PATH=/health
 
-# Working Directory & Commands
-WORKING_DIRECTORY=/var/lib/claude-on-slack/workspace
-COMMAND_TIMEOUT=5m
-MAX_OUTPUT_LENGTH=10000
-BLOCKED_COMMANDS=rm,sudo,passwd,shutdown,reboot
+# Working Directory & Commands  
+# Full system access - set to your home directory
+WORKING_DIRECTORY=/home/zero
+COMMAND_TIMEOUT=10m
+MAX_OUTPUT_LENGTH=50000
+# Minimal restrictions for personal use
+BLOCKED_COMMANDS=
 
 # Logging
 LOG_LEVEL=info
@@ -235,23 +238,12 @@ Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
 
-# Security settings
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$WORK_DIR $LOG_DIR
-PrivateTmp=true
-PrivateDevices=true
-ProtectHostname=true
-ProtectClock=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectKernelLogs=true
-ProtectControlGroups=true
-RestrictRealtime=true
-RestrictSUIDSGID=true
-RemoveIPC=true
-PrivateMounts=true
+# Security settings (minimal for personal use with full system access)
+NoNewPrivileges=false
+# Full filesystem access for personal bot
+# ProtectSystem=false (commented out for full access)
+# ProtectHome=false (commented out for home access)  
+# ReadWritePaths= (not needed with full access)
 
 # Process settings
 Restart=always

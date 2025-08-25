@@ -63,7 +63,7 @@ func Load() (*Config, error) {
 		// Default values
 		ClaudeCodePath:         "claude",
 		ClaudeTimeout:          time.Minute * 5,
-		AllowedTools:           []string{"Read", "Write", "Bash", "Grep", "Glob", "WebSearch"},
+		AllowedTools:           []string{}, // Empty = all tools allowed for full access
 		DisallowedTools:        []string{},
 		BotName:                "claude-bot",
 		BotDisplayName:         "Claude Bot",
@@ -79,7 +79,7 @@ func Load() (*Config, error) {
 		ServerPort:             8080,
 		ServerHost:             "0.0.0.0",
 		HealthCheckPath:        "/health",
-		WorkingDirectory:       "/tmp/claude-workspace",
+		WorkingDirectory:       "/home/zero", // Default to user home for full access
 		CommandTimeout:         time.Minute * 5,
 		MaxOutputLength:        10000,
 	}

@@ -92,10 +92,11 @@ func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, se
 		args = append(args, "--session-id", sessionID)
 	}
 	
-	// Add allowed tools if specified
+	// Add allowed tools if specified (empty means all tools available)
 	if len(allowedTools) > 0 {
 		args = append(args, "--allowedTools", strings.Join(allowedTools, ","))
 	}
+	// If allowedTools is empty, don't add --allowedTools flag = Claude Code uses all tools
 	
 	// Add system prompt for Slack bot context
 	systemPrompt := "You are Claude Code running in a Slack bot environment. Be helpful, concise, and format responses appropriately for Slack."
@@ -305,20 +306,25 @@ Available commands are filtered for security.`
 
 // ProcessClaudeCodeRequest processes a request using Claude Code CLI
 func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage string, sessionID string, userID string, allowedTools []string) (string, float64, error) {
-	// Create or get user workspace
-	workspaceDir, err := e.CreateWorkspace(userID, sessionID)
-	if err != nil {
-		e.logger.Error("Failed to create workspace", zap.Error(err))
-		return "", 0, fmt.Errorf("failed to create workspace: %w", err)
+	// Use configured working directory instead of isolated workspace for full system access
+	workingDir := e.config.WorkingDirectory
+	if workingDir == "" {
+		workingDir = "/home/zero" // Default to user home for full access
+	}
+	
+	// Ensure working directory exists
+	if err := os.MkdirAll(workingDir, 0755); err != nil {
+		e.logger.Error("Failed to create working directory", zap.Error(err))
+		return "", 0, fmt.Errorf("failed to create working directory: %w", err)
 	}
 
 	e.logger.Info("Processing Claude Code request",
 		zap.String("user_id", userID),
 		zap.String("session_id", sessionID),
-		zap.String("workspace", workspaceDir))
+		zap.String("working_dir", workingDir))
 
 	// Execute Claude Code CLI
-	response, err := e.ExecuteClaudeCode(ctx, userMessage, sessionID, workspaceDir, allowedTools)
+	response, err := e.ExecuteClaudeCode(ctx, userMessage, sessionID, workingDir, allowedTools)
 	if err != nil {
 		e.logger.Error("Failed to execute Claude Code", zap.Error(err))
 		return "", 0, fmt.Errorf("failed to execute Claude Code: %w", err)

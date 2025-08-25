@@ -355,14 +355,17 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 	s.slackAPI.PostMessage(event.Channel, slack.MsgOptionText("🤔 Thinking...", false))
 
 	// Get allowed tools for this user
+	// Empty AllowedTools means all tools are allowed (full system access)
 	allowedTools := s.config.AllowedTools
-	if s.authService.IsUserAdmin(event.User) {
-		// Admin users get all tools
-		allowedTools = s.config.AllowedTools
+	
+	// If no tools specified (empty array), allow all tools by passing empty array to Claude Code
+	// Claude Code will use all available tools when no --allowedTools is specified
+	if len(allowedTools) == 0 {
+		allowedTools = []string{} // Empty means all tools
 	} else {
-		// Filter out restricted tools for regular users
+		// Filter out disallowed tools if specific tools are configured
 		filteredTools := []string{}
-		for _, tool := range s.config.AllowedTools {
+		for _, tool := range allowedTools {
 			isDisallowed := false
 			for _, disallowed := range s.config.DisallowedTools {
 				if tool == disallowed {

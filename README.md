@@ -47,12 +47,22 @@ Claude on Slack bridges the gap between Slack conversations and Claude Code's po
 Copy `.env.example` to `.env` and configure:
 
 ```bash
+# Required configuration
 SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
 SLACK_APP_TOKEN=xapp-your-slack-app-token  
+SLACK_SIGNING_SECRET=your-slack-signing-secret
 CLAUDE_API_KEY=sk-your-anthropic-api-key
+
+# Access control
 ALLOWED_USERS=user1@domain.com,user2@domain.com
-MAX_DAILY_COST_USD=10.00
-WORKING_DIR_BASE=/tmp/slack-claude-sessions
+ADMIN_USERS=admin@domain.com
+
+# Server settings (for SSH tunnel setup)
+SERVER_HOST=0.0.0.0
+SERVER_PORT=8080
+
+# Working directory
+WORKING_DIRECTORY=/tmp/claude-workspace
 ```
 
 ## 📖 Usage

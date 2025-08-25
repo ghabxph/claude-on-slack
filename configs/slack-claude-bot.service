@@ -1,0 +1,38 @@
+[Unit]
+Description=Claude on Slack Bot Service
+Documentation=https://github.com/ghabxph/claude-on-slack
+After=network-online.target
+Wants=network-online.target
+Requires=network.target
+
+[Service]
+Type=simple
+User=slack-claude-bot
+Group=slack-claude-bot
+WorkingDirectory=/opt/slack-claude-bot
+ExecStart=/opt/slack-claude-bot/slack-claude-bot
+EnvironmentFile=-/opt/slack-claude-bot/.env
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=slack-claude-bot
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/tmp /opt/slack-claude-bot
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

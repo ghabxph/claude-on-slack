@@ -112,15 +112,25 @@ def fibonacci(n):
 
 ```
 ├── cmd/slack-claude-bot/     # Main application entry point
-├── internal/
-│   ├── bot/                  # Slack bot logic
+│   └── main.go               # Application entry point with HTTP server
+├── internal/                 # Core application modules
+│   ├── auth/                 # Authentication & authorization
+│   │   └── service.go        # User permissions and access control
+│   ├── bot/                  # Slack bot logic  
+│   │   └── service.go        # Slack event handling and message processing
 │   ├── claude/              # Claude Code executor
-│   ├── auth/                # Authentication & authorization
-│   ├── session/             # Session management
-│   └── config/              # Configuration management
+│   │   └── executor.go       # Claude Code CLI wrapper and execution
+│   ├── config/              # Configuration management
+│   │   └── config.go         # Environment variable loading and validation
+│   └── session/             # Session management
+│       └── manager.go        # User session persistence and context
 ├── configs/                 # Configuration files and templates
-├── scripts/                 # Installation and deployment scripts
-└── docs/                    # Documentation and guides
+├── scripts/                 # Installation and deployment scripts  
+├── docs/                    # Documentation and guides
+│   └── examples/            # Usage examples and integration guides
+└── tests/                   # Test suites
+    ├── unit/                # Unit tests
+    └── integration/         # Integration tests
 ```
 
 ### Building
@@ -145,10 +155,32 @@ go test ./...
 
 For production deployment on Linux:
 
-1. Copy binary to `/opt/slack-claude-bot/`
-2. Configure environment in `/opt/slack-claude-bot/.env`
-3. Install systemd service: `sudo systemctl enable slack-claude-bot.service`
-4. Start service: `sudo systemctl start slack-claude-bot`
+1. **Copy binary to `/opt/slack-claude-bot/`**
+   ```bash
+   sudo mkdir -p /opt/slack-claude-bot
+   sudo cp slack-claude-bot /opt/slack-claude-bot/
+   sudo chmod +x /opt/slack-claude-bot/slack-claude-bot
+   ```
+
+2. **Configure environment in `/opt/slack-claude-bot/.env`**
+   ```bash
+   sudo cp .env.example /opt/slack-claude-bot/.env
+   sudo nano /opt/slack-claude-bot/.env  # Edit with your actual values
+   ```
+
+3. **Create service user**
+   ```bash
+   sudo useradd --system --no-create-home --shell /bin/false slack-claude-bot
+   sudo chown -R slack-claude-bot:slack-claude-bot /opt/slack-claude-bot
+   ```
+
+4. **Install systemd service**
+   ```bash
+   sudo cp configs/slack-claude-bot.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable slack-claude-bot.service
+   sudo systemctl start slack-claude-bot
+   ```
 
 ### Docker
 
@@ -159,10 +191,27 @@ docker run -d --env-file .env --name claude-bot claude-on-slack
 
 ## 📊 Monitoring
 
-- Health check endpoint: `/health`
-- Metrics and usage tracking via structured logging
-- Integration with monitoring systems (Prometheus, etc.)
-- Slack notifications for service health and security events
+### Health Check Endpoints
+- **Health check**: `http://localhost:8081/health` - Service health status
+- **Metrics**: `http://localhost:8081/metrics` - Basic service information
+
+### Logging
+- **Structured JSON logging** for production environments
+- **Console logging** for development  
+- **Comprehensive audit trail** of all user commands and responses
+- **Cost tracking** and usage monitoring per user
+
+### Service Monitoring
+```bash
+# Check service status
+sudo systemctl status slack-claude-bot
+
+# View real-time logs
+sudo journalctl -u slack-claude-bot -f
+
+# Check health endpoint
+curl http://localhost:8081/health
+```
 
 ## 🤝 Contributing
 

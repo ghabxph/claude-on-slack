@@ -175,34 +175,42 @@ sudo journalctl -u slack-claude-bot -f
 
 This project is open source and available under the [MIT License](LICENSE).
 
-## 🔮 Upcoming Features
+## 🆕 Latest Features
 
-### Concurrent Multi-Session Support (In Development)
+### PostgreSQL Session Persistence (v2.0.0)
 
-We're working on enhancing the session management system to better support multi-tasking and concurrent conversations:
+Enhanced session management with database-backed persistence:
 
 #### Key Features
+- **Session Persistence**: Sessions survive service restarts
+- **Conversation Chains**: Complete conversation history recording
+- **Database-Backed Storage**: PostgreSQL integration with Docker Compose
+- **O(1) Performance**: Optimized memory loading for fast session access
+- **Migration Ready**: Easy upgrade from memory-based to database storage
+
+#### Database Integration
+- **3-Table Design**: sessions, child_sessions, slack_channels
+- **Conversation Trees**: Complete conversation chain recording  
+- **Session Branching**: Support for conversation branching and switching
+- **Performance Optimized**: Single query loads entire conversation tree
+
+#### Setup
+```bash
+# Enable database persistence
+ENABLE_DATABASE_PERSISTENCE=true
+
+# Start PostgreSQL
+docker compose up -d postgres
+
+# Run migrations and start service  
+./scripts/redeploy.sh
+```
+
+### Multi-Session Support (Enhanced)
 - **Concurrent Sessions**: Run multiple Claude conversations simultaneously
-- **Per-Session Mode Control**: Each session maintains its own permission mode and settings
-- **Latest Session Tracking**: Automatically manage session lifecycle
-  - Keep track of latest/active sessions
-  - Discard old/completed sessions
-  - Monitor session status (in-progress/completed)
-
-#### Implementation Plan
-1. **Phase 1 - Memory-Based Implementation**
-   - Simple in-memory session tracking
-   - Latest session prioritization
-   - Session status monitoring
-   - Per-session mode management
-
-2. **Phase 2 - Database Integration**
-   - PostgreSQL integration for persistent storage
-   - Enhanced session switching capabilities
-   - Historical session lookup
-   - Comprehensive session metadata
-
-The initial implementation will be kept simple and memory-based, with database integration planned for future scalability.
+- **Per-Session Modes**: Each session maintains independent permission settings
+- **Database Persistence**: Sessions persist across service restarts
+- **Session Management**: Advanced switching and branching capabilities
 
 ### Image Support (Research)
 • Support for processing images uploaded to Slack channels (not yet implemented)

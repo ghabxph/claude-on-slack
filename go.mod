@@ -5,6 +5,7 @@ go 1.21
 require (
 	github.com/google/uuid v1.4.0
 	github.com/joho/godotenv v1.5.1
+	github.com/lib/pq v1.10.9
 	github.com/slack-go/slack v0.12.3
 	go.uber.org/zap v1.26.0
 )

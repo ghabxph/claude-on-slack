@@ -18,6 +18,19 @@ const (
 	PermissionModePlan           PermissionMode = "plan"
 )
 
+// DatabaseConfig holds database connection settings
+type DatabaseConfig struct {
+	URL              string
+	Host             string
+	Port             int
+	Name             string
+	User             string
+	Password         string
+	MaxConnections   int
+	IdleConnections  int
+	MaxLifetime      time.Duration
+}
+
 // Config holds all configuration for the Claude on Slack bot
 type Config struct {
 	// Slack configuration
@@ -45,7 +58,6 @@ type Config struct {
 	SessionCleanupInterval time.Duration
 
 	// Security configuration
-	EnableAuth         bool
 	AdminUsers         []string
 	RateLimitPerMinute int
 	MaxMessageLength   int
@@ -66,6 +78,12 @@ type Config struct {
 	BlockedCommands  []string
 	CommandTimeout   time.Duration
 	MaxOutputLength  int
+
+	// Database configuration
+	Database                DatabaseConfig
+	EnableDatabasePersistence bool
+	NotificationChannels    []string
+	AppVersion              string
 }
 
 // Load loads configuration from environment variables
@@ -82,7 +100,6 @@ func Load() (*Config, error) {
 		SessionTimeout:         time.Hour * 2,
 		MaxSessionsPerUser:     3,
 		SessionCleanupInterval: time.Minute * 15,
-		EnableAuth:             true,
 		RateLimitPerMinute:     20,
 		MaxMessageLength:       4000,
 		LogLevel:               "info",
@@ -93,6 +110,18 @@ func Load() (*Config, error) {
 		WorkingDirectory:       "", // Default to current directory - set in .env
 		CommandTimeout:         time.Minute * 5,
 		MaxOutputLength:        10000,
+		// Database defaults
+		Database: DatabaseConfig{
+			Host:            "localhost",
+			Port:            5432,
+			Name:            "claude_slack",
+			User:            "claude_bot",
+			MaxConnections:  10,
+			IdleConnections: 2,
+			MaxLifetime:     time.Hour,
+		},
+		EnableDatabasePersistence: false,
+		AppVersion:               "2.0.0",
 	}
 
 	// Load required environment variables
@@ -178,12 +207,6 @@ func Load() (*Config, error) {
 		}
 	}
 
-	if val := os.Getenv("ENABLE_AUTH"); val != "" {
-		cfg.EnableAuth, err = strconv.ParseBool(val)
-		if err != nil {
-			return nil, fmt.Errorf("invalid ENABLE_AUTH: %v", err)
-		}
-	}
 
 	if val := os.Getenv("ADMIN_USERS"); val != "" {
 		cfg.AdminUsers = strings.Split(val, ",")
@@ -257,6 +280,70 @@ func Load() (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid MAX_OUTPUT_LENGTH: %v", err)
 		}
+	}
+
+	// Database configuration
+	if val := os.Getenv("DATABASE_URL"); val != "" {
+		cfg.Database.URL = val
+	}
+
+	if val := os.Getenv("DB_HOST"); val != "" {
+		cfg.Database.Host = val
+	}
+
+	if val := os.Getenv("DB_PORT"); val != "" {
+		cfg.Database.Port, err = strconv.Atoi(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DB_PORT: %v", err)
+		}
+	}
+
+	if val := os.Getenv("DB_NAME"); val != "" {
+		cfg.Database.Name = val
+	}
+
+	if val := os.Getenv("DB_USER"); val != "" {
+		cfg.Database.User = val
+	}
+
+	if val := os.Getenv("DB_PASSWORD"); val != "" {
+		cfg.Database.Password = val
+	}
+
+	if val := os.Getenv("DB_MAX_CONNECTIONS"); val != "" {
+		cfg.Database.MaxConnections, err = strconv.Atoi(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DB_MAX_CONNECTIONS: %v", err)
+		}
+	}
+
+	if val := os.Getenv("DB_IDLE_CONNECTIONS"); val != "" {
+		cfg.Database.IdleConnections, err = strconv.Atoi(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DB_IDLE_CONNECTIONS: %v", err)
+		}
+	}
+
+	if val := os.Getenv("DB_MAX_LIFETIME"); val != "" {
+		cfg.Database.MaxLifetime, err = time.ParseDuration(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DB_MAX_LIFETIME: %v", err)
+		}
+	}
+
+	if val := os.Getenv("ENABLE_DATABASE_PERSISTENCE"); val != "" {
+		cfg.EnableDatabasePersistence, err = strconv.ParseBool(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid ENABLE_DATABASE_PERSISTENCE: %v", err)
+		}
+	}
+
+	if val := os.Getenv("SLACK_NOTIFICATION_CHANNELS"); val != "" {
+		cfg.NotificationChannels = strings.Split(val, ",")
+	}
+
+	if val := os.Getenv("APP_VERSION"); val != "" {
+		cfg.AppVersion = val
 	}
 
 	return cfg, nil

@@ -3,6 +3,7 @@ package bot
 import (
 	"bytes"
 	"context"
+	"math"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -672,7 +673,6 @@ func (s *Service) handleStatusCommand(ctx context.Context, event *slackevents.Me
 👥 Total Users: %v
 🎯 Active Sessions: %v
 📝 Total Messages: %v
-🔒 Auth Enabled: %v
 🚦 Rate Limit: %d/min
 
 Use `+"`sessions`"+` to see your active sessions.`,
@@ -680,7 +680,6 @@ Use `+"`sessions`"+` to see your active sessions.`,
 		authStats["total_users"],
 		sessionStats["active_sessions"],
 		sessionStats["total_messages"],
-		authStats["auth_enabled"],
 		s.config.RateLimitPerMinute), nil
 }
 
@@ -739,7 +738,7 @@ func (s *Service) handleStatsCommand(ctx context.Context, event *slackevents.Mes
 
 **System:**
 • Uptime: %v
-• Auth: %v`,
+• Auth Enabled: %v`,
 		sessionStats["total_sessions"],
 		sessionStats["active_sessions"],
 		sessionStats["total_messages"],
@@ -940,8 +939,8 @@ func (s *Service) handleSlackEvents(w http.ResponseWriter, r *http.Request) {
 // verifySlackSignature verifies the Slack request signature
 func (s *Service) verifySlackSignature(headers http.Header, body []byte) bool {
 	if s.config.SlackSigningSecret == "" {
-		s.logger.Warn("Slack signing secret not configured, skipping signature verification")
-		return true // Skip verification if no secret configured
+		s.logger.Error("Slack signing secret not configured, rejecting request")
+		return false // Fail securely when secret is not configured
 	}
 
 	timestamp := headers.Get("X-Slack-Request-Timestamp")
@@ -957,7 +956,7 @@ func (s *Service) verifySlackSignature(headers http.Header, body []byte) bool {
 		return false
 	}
 
-	if time.Now().Unix()-ts > 300 { // 5 minutes
+	if math.Abs(float64(time.Now().Unix()-ts)) > 300 { // 5 minutes
 		return false
 	}
 

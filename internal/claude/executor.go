@@ -94,7 +94,7 @@ func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, se
 	args := []string{
 		"--print",
 		"--output-format", "json",
-		"--model", "claude-3-5-sonnet-20241022",
+		"--model", "sonnet",
 	}
 	
 	// Add session flag based on whether it's a new session or continuation

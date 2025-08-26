@@ -131,12 +131,6 @@ func (s *Service) AuthenticateUser(ctx *AuthContext) (*UserInfo, error) {
 
 // AuthorizeUser checks if a user is authorized for a specific action
 func (s *Service) AuthorizeUser(ctx *AuthContext, requiredPermission Permission) error {
-	// Check if authentication is enabled
-	if !s.config.EnableAuth {
-		s.logger.Debug("Authentication disabled, allowing all requests")
-		return nil
-	}
-
 	// Check if user is banned
 	if s.isUserBanned(ctx.UserID) {
 		s.logger.Warn("Blocked banned user", zap.String("user_id", ctx.UserID))
@@ -445,7 +439,7 @@ func (s *Service) GetStats() map[string]interface{} {
 		"banned_users":   bannedUsers,
 		"active_bans":    activeBans,
 		"total_channels": totalChannels,
-		"auth_enabled":   s.config.EnableAuth,
+		"auth_enabled":   true,
 	}
 }
 

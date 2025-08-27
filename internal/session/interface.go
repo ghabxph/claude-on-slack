@@ -36,6 +36,11 @@ type SessionManager interface {
 	ListUserSessions(userID string) string
 	GetSessionStats() map[string]interface{}
 
+	// Session listing and paths (for enhanced /session command)
+	ListAllSessions(limit int) ([]SessionInfo, error)
+	GetKnownPaths(limit int) ([]string, error)
+	GetSessionsByPath(path string, limit int) ([]SessionInfo, error)
+
 	// Lifecycle
 	Stop()
 }
@@ -65,4 +70,4 @@ func (s *Session) GetCurrentWorkDir() string             { return s.CurrentWorkD
 func (s *Session) GetPermissionMode() config.PermissionMode { return s.PermissionMode }
 func (s *Session) GetCreatedAt() time.Time               { return s.CreatedAt }
 func (s *Session) GetLastActivity() time.Time            { return s.LastActivity }
-func (s *Session) IsActive() bool                        { return s.IsActive }
+func (s *Session) IsActive() bool                        { return s.Active }

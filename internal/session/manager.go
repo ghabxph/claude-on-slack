@@ -31,7 +31,7 @@ type Session struct {
 	CurrentWorkDir  string                 `json:"current_work_dir"` // Current working directory from Claude
 	History         []claude.Message       `json:"history"`
 	Context       map[string]interface{} `json:"context"`
-	IsActive      bool                   `json:"is_active"`
+	Active        bool                   `json:"is_active"`
 	TokensUsed    int                    `json:"tokens_used"`
 	RateLimitInfo *RateLimitInfo         `json:"rate_limit_info"`
 	ExecutionMutex  sync.Mutex             `json:"-"` // Prevents concurrent executions within same session
@@ -90,7 +90,7 @@ func (m *Manager) CreateSession(userID, channelID string) (*Session, error) {
 		var oldestSession *Session
 		var oldestIndex int
 		for i, session := range userSessions {
-			if !session.IsActive && (oldestSession == nil || session.LastActivity.Before(oldestSession.LastActivity)) {
+			if !session.Active && (oldestSession == nil || session.LastActivity.Before(oldestSession.LastActivity)) {
 				oldestSession = session
 				oldestIndex = i
 			}
@@ -139,7 +139,7 @@ func (m *Manager) CreateSession(userID, channelID string) (*Session, error) {
 		WorkspaceDir: workspaceDir,
 		History:      make([]claude.Message, 0),
 		Context:      make(map[string]interface{}),
-		IsActive:     true,
+		Active:       true,
 		RateLimitInfo: &RateLimitInfo{
 			WindowStart: time.Now(),
 		},
@@ -185,7 +185,7 @@ func (m *Manager) GetActiveSessionsForUser(userID string) []*Session {
 	activeSessions := make([]*Session, 0)
 
 	for _, session := range userSessions {
-		if session.IsActive {
+		if session.Active {
 			activeSessions = append(activeSessions, session)
 		}
 	}
@@ -198,7 +198,7 @@ func (m *Manager) GetOrCreateSession(userID, channelID string) (*Session, error)
 	// Check for existing active session in the same channel
 	activeSessions := m.GetActiveSessionsForUser(userID)
 	for _, session := range activeSessions {
-		if session.ChannelID == channelID && session.IsActive {
+		if session.ChannelID == channelID && session.Active {
 			return session, nil
 		}
 	}
@@ -260,7 +260,7 @@ func (m *Manager) CloseSession(sessionID string) error {
 	}
 
 	// Mark as inactive
-	session.IsActive = false
+	session.Active = false
 
 	// Remove from maps
 	delete(m.sessions, sessionID)
@@ -343,7 +343,7 @@ func (m *Manager) GetSessionStats() map[string]interface{} {
 	totalMessages := 0
 
 	for _, session := range m.sessions {
-		if session.IsActive {
+		if session.Active {
 			activeSessions++
 		}
 		totalMessages += session.MessageCount
@@ -582,4 +582,57 @@ func (m *Manager) GetPermissionMode(sessionID string) (config.PermissionMode, er
 		return config.PermissionModeDefault, nil
 	}
 	return session.PermissionMode, nil
+}
+
+// ListAllSessions returns all sessions (memory-based implementation)
+func (m *Manager) ListAllSessions(limit int) ([]SessionInfo, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var sessions []SessionInfo
+	count := 0
+	for _, session := range m.sessions {
+		if count >= limit {
+			break
+		}
+		sessions = append(sessions, session)
+		count++
+	}
+
+	return sessions, nil
+}
+
+// GetKnownPaths returns unique workspace directories (memory-based implementation)
+func (m *Manager) GetKnownPaths(limit int) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	pathMap := make(map[string]bool)
+	var paths []string
+
+	for _, session := range m.sessions {
+		if !pathMap[session.WorkspaceDir] && len(paths) < limit {
+			pathMap[session.WorkspaceDir] = true
+			paths = append(paths, session.WorkspaceDir)
+		}
+	}
+
+	return paths, nil
+}
+
+// GetSessionsByPath returns sessions for a specific path (memory-based implementation)
+func (m *Manager) GetSessionsByPath(path string, limit int) ([]SessionInfo, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var sessions []SessionInfo
+	count := 0
+	for _, session := range m.sessions {
+		if session.WorkspaceDir == path && count < limit {
+			sessions = append(sessions, session)
+			count++
+		}
+	}
+
+	return sessions, nil
 }

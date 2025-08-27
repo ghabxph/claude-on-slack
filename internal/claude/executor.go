@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -370,8 +369,10 @@ func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage str
 
 // CreateWorkspace creates a dedicated workspace directory for a user session
 func (e *Executor) CreateWorkspace(userID, sessionID string) (string, error) {
-	workspaceDir := filepath.Join(e.config.WorkingDirectory, "sessions", userID, sessionID)
+	// Just use the base working directory - no nested sessions folders
+	workspaceDir := e.config.WorkingDirectory
 	
+	// Ensure directory exists
 	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
 		e.logger.Error("Failed to create workspace", 
 			zap.Error(err), 
@@ -379,7 +380,7 @@ func (e *Executor) CreateWorkspace(userID, sessionID string) (string, error) {
 		return "", fmt.Errorf("failed to create workspace: %w", err)
 	}
 
-	e.logger.Info("Created workspace", 
+	e.logger.Info("Using workspace", 
 		zap.String("workspace", workspaceDir),
 		zap.String("user_id", userID),
 		zap.String("session_id", sessionID))

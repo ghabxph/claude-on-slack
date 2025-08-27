@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ import (
 	"github.com/ghabxph/claude-on-slack/internal/auth"
 	"github.com/ghabxph/claude-on-slack/internal/claude"
 	"github.com/ghabxph/claude-on-slack/internal/config"
+	"github.com/ghabxph/claude-on-slack/internal/notifications"
 	"github.com/ghabxph/claude-on-slack/internal/session"
 )
 
@@ -135,6 +137,9 @@ func (s *Service) Start(ctx context.Context) error {
 			s.logger.Debug("Socket Mode not available or disabled", zap.Error(err))
 		}
 	}()
+
+	// Send startup notification after successful initialization
+	s.sendStartupNotification()
 
 	return nil
 }
@@ -767,7 +772,7 @@ Built with ❤️ for Slack`,
 
 func (s *Service) handleSetSessionCommand(ctx context.Context, event *slackevents.MessageEvent, args []string) (string, error) {
 	if len(args) == 0 {
-		// Show current session info
+		// Show current session info and available sessions
 		userSession, err := s.sessionManager.GetOrCreateSession(event.User, event.Channel)
 		if err != nil {
 			return "❌ Failed to get session info", err
@@ -778,23 +783,132 @@ func (s *Service) handleSetSessionCommand(ctx context.Context, event *slackevent
 			currentSessionID = "None (new conversation)"
 		}
 
-		return fmt.Sprintf("📋 **Current Session Info**\n\nClaude Session ID: `%s`\nBot Session ID: `%s`\nMessages: %d\n\n**Usage:**\n• `session <claude-session-id>` - Switch to specific Claude session\n• `session new` - Start a new conversation",
-			currentSessionID, userSession.ID, userSession.MessageCount), nil
+		// Get list of available sessions
+		sessions, err := s.sessionManager.ListAllSessions(10)
+		if err != nil {
+			s.logger.Error("Failed to list sessions", zap.Error(err))
+		}
+
+		// Get known paths
+		paths, err := s.sessionManager.GetKnownPaths(10)
+		if err != nil {
+			s.logger.Error("Failed to get known paths", zap.Error(err))
+		}
+
+		response := fmt.Sprintf("📋 **Current Session Info**\n\nClaude Session ID: `%s`\nBot Session ID: `%s`\nMessages: %d\n\n**Usage:**\n• `session list` - Show detailed list of all sessions\n• `session <claude-session-id>` - Switch to specific Claude session\n• `session new <path>` - Start new conversation in specific path\n• `session new` - Start new conversation in current directory\n• `session . <path>` - Switch to or create session for specific path",
+			currentSessionID, userSession.ID, userSession.MessageCount)
+
+		if len(sessions) > 0 {
+			response += "\n\n**Available Sessions:**\n"
+			for i, session := range sessions {
+				if i >= 5 { // Limit to 5 sessions
+					response += "• _... and more_\n"
+					break
+				}
+				response += fmt.Sprintf("• `%s` - %s (%s)\n", 
+					session.GetID()[:8], // Show first 8 chars of session ID
+					session.GetWorkspaceDir(), 
+					session.GetLastActivity().Format("Jan 2 15:04"))
+			}
+		}
+
+		if len(paths) > 0 {
+			response += "\n**Known Paths:**\n"
+			for i, path := range paths {
+				if i >= 5 { // Limit to 5 paths
+					response += "• _... and more_\n"
+					break
+				}
+				response += fmt.Sprintf("• `%s`\n", path)
+			}
+		}
+
+		return response, nil
 	}
 
-	sessionID := args[0]
+	if args[0] == "list" {
+		// Show detailed list of all sessions
+		response, err := s.handleSessionListCommand(event.User, event.Channel)
+		if err != nil {
+			return fmt.Sprintf("❌ Failed to list sessions: %v", err), err
+		}
+		return response, nil
+	} else if args[0] == "new" {
+		// Handle new session creation with optional path
+		var workingDir string
+		if len(args) > 1 {
+			workingDir = args[1]
+		} else {
+			workingDir = s.config.WorkingDirectory
+		}
 
-	// Get current session
-	userSession, err := s.sessionManager.GetOrCreateSession(event.User, event.Channel)
-	if err != nil {
-		return "❌ Failed to get session", err
-	}
+		// Get current session to clear Claude session ID
+		userSession, err := s.sessionManager.GetOrCreateSession(event.User, event.Channel)
+		if err != nil {
+			return "❌ Failed to get session", err
+		}
 
-	if sessionID == "new" {
 		// Clear Claude session ID to start fresh
 		userSession.ClaudeSessionID = ""
-		return "✅ **New Conversation Started**\n\nNext message will start a fresh conversation with Claude.", nil
+
+		return fmt.Sprintf("✅ **New Conversation Started**\n\nWorking directory: `%s`\nNext message will start a fresh conversation with Claude.", workingDir), nil
+	} else if args[0] == "." {
+		// Switch to or create session for specific path
+		if len(args) < 2 {
+			return "❌ **Usage:** `session . <path>` - Switch to or create session for specific path", nil
+		}
+
+		newPath := args[1]
+		
+		// Find existing sessions for this path
+		existingSessions, err := s.sessionManager.GetSessionsByPath(newPath, 5)
+		if err != nil {
+			s.logger.Error("Failed to get sessions by path", zap.Error(err))
+		}
+
+		if len(existingSessions) == 0 {
+			// No existing sessions for this path, create a new one
+			// Get current session to clear Claude session ID for new path
+			userSession, err := s.sessionManager.GetOrCreateSession(event.User, event.Channel)
+			if err != nil {
+				return "❌ Failed to get session", err
+			}
+
+			// Clear Claude session ID to start fresh in new path
+			userSession.ClaudeSessionID = ""
+
+			return fmt.Sprintf("✅ **New Session Created for Path**\n\nWorking directory: `%s`\nNext message will start a fresh conversation in this path.", newPath), nil
+		} else {
+			// Found existing sessions, let user choose
+			response := fmt.Sprintf("📋 **Found %d existing session(s) for path:** `%s`\n\n", len(existingSessions), newPath)
+			response += "**Available Sessions:**\n"
+			
+			for i, session := range existingSessions {
+				if i >= 3 { // Limit to 3 sessions
+					response += "• _... and more_\n"
+					break
+				}
+				response += fmt.Sprintf("• `%s` - Last used: %s\n", 
+					session.GetID()[:8], 
+					session.GetLastActivity().Format("Jan 2 15:04"))
+			}
+			
+			response += "\n**Usage:**\n"
+			response += fmt.Sprintf("• `session %s` - Use most recent session\n", existingSessions[0].GetID()[:8])
+			response += fmt.Sprintf("• `session new %s` - Create new session for this path", newPath)
+			
+			return response, nil
+		}
 	} else {
+		// Switch to specific Claude session ID
+		sessionID := args[0]
+
+		// Get current session
+		userSession, err := s.sessionManager.GetOrCreateSession(event.User, event.Channel)
+		if err != nil {
+			return "❌ Failed to get session", err
+		}
+
 		// Set specific Claude session ID
 		userSession.ClaudeSessionID = sessionID
 		return fmt.Sprintf("✅ **Session Switched**\n\nNow using Claude session: `%s`\n\nNext message will resume this conversation.", sessionID), nil
@@ -1110,7 +1224,7 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 
 	args := strings.Fields(text)
 
-	// If no argument or "help", show help/current info
+	// If no argument or "help", show help/current info with suggestions
 	if len(args) == 0 || args[0] == "help" {
 		userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
 		if err != nil {
@@ -1122,23 +1236,138 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 			currentSessionID = "None (new conversation)"
 		}
 
-		return fmt.Sprintf("📋 **Session Management Help**\n\n**Current Session:**\n• Claude Session ID: `%s`\n• Bot Session ID: `%s`\n• Messages: %d\n\n**Usage:**\n• `/session` - Show this help\n• `/session <claude-session-id>` - Switch to specific Claude session\n• `/session new` - Start a new conversation\n• `/session help` - Show this help\n\n**Note:** Each message shows the session ID at the bottom.",
+		// Get list of available sessions
+		sessions, err := s.sessionManager.ListAllSessions(10)
+		if err != nil {
+			s.logger.Error("Failed to list sessions", zap.Error(err))
+		}
+
+		// Get known paths with default suggestion
+		paths, err := s.sessionManager.GetKnownPaths(10)
+		if err != nil {
+			s.logger.Error("Failed to get known paths", zap.Error(err))
+		}
+		
+		// Add default project path if no paths found
+		if len(paths) == 0 {
+			paths = []string{"/home/zero/files/projects/ghabxph/claude"}
+		}
+
+		response := fmt.Sprintf("📋 **Session Management Help**\n\n**Current Session:**\n• Claude Session ID: `%s`\n• Bot Session ID: `%s`\n• Messages: %d\n\n**Usage:**\n• `/session` - Show this help\n• `/session list` - Show detailed list of all sessions\n• `/session <claude-session-id>` - Switch to specific Claude session\n• `/session new <path>` - Start new conversation in specific path\n• `/session new` - Start new conversation in current directory\n• `/session . <path>` - Switch to or create session for specific path",
 			currentSessionID, userSession.ID, userSession.MessageCount)
+
+		if len(sessions) > 0 {
+			response += "\n\n**Available Sessions:**\n"
+			for i, session := range sessions {
+				if i >= 5 { // Limit to 5 sessions
+					response += "• _... and more_\n"
+					break
+				}
+				response += fmt.Sprintf("• `%s` - %s (%s)\n", 
+					session.GetID()[:8], // Show first 8 chars of session ID
+					session.GetWorkspaceDir(), 
+					session.GetLastActivity().Format("Jan 2 15:04"))
+			}
+		}
+
+		if len(paths) > 0 {
+			response += "\n**Suggested Paths:**\n"
+			for i, path := range paths {
+				if i >= 5 { // Limit to 5 paths
+					response += "• _... and more_\n"
+					break
+				}
+				response += fmt.Sprintf("• `%s`\n", path)
+			}
+		}
+
+		response += "\n\n**Note:** Each message shows the session ID at the bottom."
+
+		return response
 	}
 
-	sessionID := args[0]
+	if args[0] == "list" {
+		// Show detailed list of all sessions
+		response, err := s.handleSessionListCommand(userID, channelID)
+		if err != nil {
+			return fmt.Sprintf("❌ Failed to list sessions: %v", err)
+		}
+		return response
+	} else if args[0] == "new" {
+		// Handle new session creation with optional path
+		var workingDir string
+		if len(args) > 1 {
+			workingDir = args[1]
+		} else {
+			workingDir = s.config.WorkingDirectory
+		}
 
-	// Get current session
-	userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
-	if err != nil {
-		return "❌ Failed to get session"
-	}
+		// Get current session to clear Claude session ID
+		userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
+		if err != nil {
+			return "❌ Failed to get session"
+		}
 
-	if sessionID == "new" {
 		// Clear Claude session ID to start fresh
 		userSession.ClaudeSessionID = ""
-		return "✅ **New Conversation Started**\n\nNext message will start a fresh conversation with Claude."
+
+		return fmt.Sprintf("✅ **New Conversation Started**\n\nWorking directory: `%s`\nNext message will start a fresh conversation with Claude.", workingDir)
+	} else if args[0] == "." {
+		// Switch to or create session for specific path
+		if len(args) < 2 {
+			return "❌ **Usage:** `/session . <path>` - Switch to or create session for specific path"
+		}
+
+		newPath := args[1]
+		
+		// Find existing sessions for this path
+		existingSessions, err := s.sessionManager.GetSessionsByPath(newPath, 5)
+		if err != nil {
+			s.logger.Error("Failed to get sessions by path", zap.Error(err))
+		}
+
+		if len(existingSessions) == 0 {
+			// No existing sessions for this path, create a new one
+			userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
+			if err != nil {
+				return "❌ Failed to get session"
+			}
+
+			// Clear Claude session ID to start fresh in new path
+			userSession.ClaudeSessionID = ""
+
+			return fmt.Sprintf("✅ **New Session Created for Path**\n\nWorking directory: `%s`\nNext message will start a fresh conversation in this path.", newPath)
+		} else {
+			// Found existing sessions, let user choose
+			response := fmt.Sprintf("📋 **Found %d existing session(s) for path:** `%s`\n\n", len(existingSessions), newPath)
+			response += "**Available Sessions:**\n"
+			
+			for i, session := range existingSessions {
+				if i >= 3 { // Limit to 3 sessions
+					response += "• _... and more_\n"
+					break
+				}
+				response += fmt.Sprintf("• `%s` - Last used: %s\n", 
+					session.GetID()[:8], 
+					session.GetLastActivity().Format("Jan 2 15:04"))
+			}
+			
+			response += "\n**Usage:**\n"
+			response += fmt.Sprintf("• `/session %s` - Use most recent session\n", existingSessions[0].GetID()[:8])
+			response += fmt.Sprintf("• `/session new %s` - Create new session for this path", newPath)
+			
+			return response
+		}
 	} else {
+		// Switch to specific Claude session ID
+		sessionID := args[0]
+
+		// Get current session
+		userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
+		if err != nil {
+			return "❌ Failed to get session"
+		}
+
 		// Set specific Claude session ID
 		userSession.ClaudeSessionID = sessionID
 		return fmt.Sprintf("✅ **Session Switched**\n\nNow using Claude session: `%s`\n\nNext message will resume this conversation.", sessionID)
@@ -1194,6 +1423,114 @@ func (s *Service) handleStopCommand(ctx context.Context, event *slackevents.Mess
 	s.stopCh = make(chan struct{})
 
 	return "✅ Processing stopped.", nil
+}
+
+// sendStartupNotification sends a notification to configured channels when the bot starts up
+func (s *Service) sendStartupNotification() {
+	// Check for deployment notification channels from environment
+	var notifyChannels []string
+	if deployChannels := os.Getenv("DEPLOYMENT_NOTIFY_CHANNELS"); deployChannels != "" {
+		notifyChannels = strings.Split(deployChannels, ",")
+		// Trim whitespace from channel IDs
+		for i, ch := range notifyChannels {
+			notifyChannels[i] = strings.TrimSpace(ch)
+		}
+	}
+	
+	// Fallback to auto-response channels if no deployment channels configured
+	if len(notifyChannels) == 0 && len(s.config.AutoResponseChannels) > 0 {
+		notifyChannels = s.config.AutoResponseChannels
+	}
+	
+	if len(notifyChannels) == 0 {
+		s.logger.Info("No notification channels configured, skipping startup notification")
+		return
+	}
+
+	s.logger.Info("Sending startup notification", zap.Strings("channels", notifyChannels))
+
+	// Create notifier
+	notifier := notifications.NewDeploymentNotifier(s.slackAPI, notifyChannels, s.logger)
+
+	// Send startup notification in a goroutine to not block startup
+	go func() {
+		// Wait a few seconds to ensure the bot is fully initialized
+		time.Sleep(3 * time.Second)
+
+		changes := []string{
+			"Enhanced session management with interactive features",
+			"Smart path suggestions based on session history",
+			"Improved /session command with session listing",
+			"Path-based session switching with /session . <path>",
+			"Intelligent session selection for existing paths",
+		}
+
+		if err := notifier.NotifyDeployment(changes); err != nil {
+			s.logger.Error("Failed to send startup notification", zap.Error(err))
+		} else {
+			s.logger.Info("Startup notification sent successfully")
+		}
+	}()
+}
+
+// handleSessionListCommand shows a detailed list of all sessions
+func (s *Service) handleSessionListCommand(userID, channelID string) (string, error) {
+	// Get all sessions (limit to 20 for readability)
+	sessions, err := s.sessionManager.ListAllSessions(20)
+	if err != nil {
+		s.logger.Error("Failed to list sessions", zap.Error(err))
+		return "❌ Failed to retrieve session list", err
+	}
+
+	if len(sessions) == 0 {
+		return "📋 **No Sessions Found**\n\nNo sessions exist yet. Use `/session new` to create your first session.", nil
+	}
+
+	// Group sessions by working directory
+	sessionsByPath := make(map[string][]session.SessionInfo)
+	for _, session := range sessions {
+		path := session.GetWorkspaceDir()
+		sessionsByPath[path] = append(sessionsByPath[path], session)
+	}
+
+	response := fmt.Sprintf("📋 **All Sessions** (%d total)\n\n", len(sessions))
+
+	// Show sessions grouped by path
+	pathCount := 0
+	for path, pathSessions := range sessionsByPath {
+		if pathCount >= 5 { // Limit to 5 paths to avoid overwhelming
+			response += fmt.Sprintf("_... and %d more paths_\n", len(sessionsByPath)-pathCount)
+			break
+		}
+
+		response += fmt.Sprintf("**Path:** `%s` (%d sessions)\n", path, len(pathSessions))
+		
+		// Show up to 3 sessions per path
+		for i, session := range pathSessions {
+			if i >= 3 {
+				response += fmt.Sprintf("  • _... and %d more sessions_\n", len(pathSessions)-3)
+				break
+			}
+			
+			sessionID := session.GetID()
+			if len(sessionID) > 8 {
+				sessionID = sessionID[:8]
+			}
+			
+			response += fmt.Sprintf("  • `%s` - Last used: %s\n", 
+				sessionID,
+				session.GetLastActivity().Format("Jan 2 15:04"))
+		}
+		response += "\n"
+		pathCount++
+	}
+
+	response += "**Usage:**\n"
+	response += "• `/session <session-id>` - Switch to specific session\n" 
+	response += "• `/session . <path>` - Switch to or create session for path\n"
+	response += "• `/session new <path>` - Create new session for path"
+
+	return response, nil
 }
 
 func (s *Service) handlePermissionSlashCommand(userID, channelID, text string) string {

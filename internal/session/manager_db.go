@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -258,9 +259,21 @@ func (m *DatabaseManager) loadSessionByID(id int) (*repository.Session, error) {
 	}
 	m.mu.RUnlock()
 
-	// Load from database - need to implement this query in repository
-	// For now, return error to indicate missing functionality
-	return nil, fmt.Errorf("loadSessionByID not implemented yet - need to add to repository")
+	// Load from database
+	session, err := m.repository.GetSessionByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, fmt.Errorf("session with ID %d not found", id)
+	}
+
+	// Cache for future lookups
+	m.mu.Lock()
+	m.sessionLookup[session.SessionID] = session
+	m.mu.Unlock()
+
+	return session, nil
 }
 
 // SwitchToSession handles session switching and branching
@@ -292,6 +305,60 @@ func (m *DatabaseManager) GetSessionStats() map[string]interface{} {
 		"database_backed":        true,
 	}
 }
+
+// ListAllSessions returns all sessions with pagination (SessionManager interface)
+func (m *DatabaseManager) ListAllSessions(limit int) ([]SessionInfo, error) {
+	sessions, err := m.repository.ListAllSessions(limit)
+	if err != nil {
+		return nil, err
+	}
+
+	var sessionInfos []SessionInfo
+	for _, session := range sessions {
+		sessionInfos = append(sessionInfos, &DbSessionInfo{session})
+	}
+
+	return sessionInfos, nil
+}
+
+// GetKnownPaths returns unique working directories from all sessions (SessionManager interface)
+func (m *DatabaseManager) GetKnownPaths(limit int) ([]string, error) {
+	return m.repository.GetUniqueWorkingDirectories(limit)
+}
+
+// GetSessionsByPath returns sessions for a specific path (database implementation)
+func (m *DatabaseManager) GetSessionsByPath(path string, limit int) ([]SessionInfo, error) {
+	sessions, err := m.repository.GetSessionsByWorkingDirectory(path, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	var sessionInfos []SessionInfo
+	for _, session := range sessions {
+		sessionInfos = append(sessionInfos, &DbSessionInfo{session})
+	}
+
+	return sessionInfos, nil
+}
+
+// DbSessionInfo wraps repository.Session to implement SessionInfo interface
+type DbSessionInfo struct {
+	*repository.Session
+}
+
+// Ensure DbSessionInfo implements SessionInfo
+var _ SessionInfo = (*DbSessionInfo)(nil)
+
+// SessionInfo implementation for database Session
+func (s *DbSessionInfo) GetID() string                         { return s.SessionID }
+func (s *DbSessionInfo) GetUserID() string                     { return s.SystemUser }
+func (s *DbSessionInfo) GetChannelID() string                  { return "" } // Not stored in DB session
+func (s *DbSessionInfo) GetWorkspaceDir() string               { return s.WorkingDirectory }
+func (s *DbSessionInfo) GetCurrentWorkDir() string             { return s.WorkingDirectory }
+func (s *DbSessionInfo) GetPermissionMode() config.PermissionMode { return config.PermissionModeDefault } // Default for DB sessions
+func (s *DbSessionInfo) GetCreatedAt() time.Time               { return s.CreatedAt }
+func (s *DbSessionInfo) GetLastActivity() time.Time            { return s.UpdatedAt }
+func (s *DbSessionInfo) IsActive() bool                        { return true } // DB sessions are considered active
 
 // Stop cleanup resources (no background routines in database mode)
 func (m *DatabaseManager) Stop() {

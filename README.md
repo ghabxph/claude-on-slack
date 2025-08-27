@@ -71,6 +71,9 @@ ADMIN_USERS=admin@domain.com
 # Auto-response channels (optional)
 AUTO_RESPONSE_CHANNELS=C1234567890  # Channel ID where bot responds to ALL messages
 
+# Deployment notification channels (optional)
+DEPLOYMENT_NOTIFY_CHANNELS=C1234567890,C0987654321  # Comma-separated channel IDs for deployment notifications
+
 # Server settings (for SSH tunnel setup)
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8080
@@ -99,9 +102,12 @@ def fibonacci(n):
 ### Slash Commands
 
 #### Session Management
-- `/session` - Show current session info and help
+- `/session` - Show current session info, available sessions, and suggested paths
+- `/session list` - Show detailed list of all sessions grouped by path
 - `/session <claude-session-id>` - Switch to specific session
-- `/session new` - Start fresh conversation
+- `/session new` - Start fresh conversation in current directory  
+- `/session new <path>` - Start fresh conversation in specific path
+- `/session . <path>` - Switch to or create session for specific path
 
 #### Permission Control
 - `/permission` - Show current permission mode and help
@@ -205,6 +211,28 @@ docker compose up -d postgres
 # Run migrations and start service  
 ./scripts/redeploy.sh
 ```
+
+### Enhanced Session Management (v2.1.0)
+
+Interactive and stateful session management with database integration:
+
+#### New Features
+- **Interactive Session Listing**: `/session` shows available sessions with timestamps and paths
+- **Path Suggestions**: Smart path suggestions based on previous sessions
+- **Default Path Suggestion**: Suggests `/home/zero/files/projects/ghabxph/claude` when no sessions exist
+- **Path-based Session Management**: Switch to or create sessions for specific paths with `/session . <path>`
+- **Session Creation with Paths**: Create new sessions with specific working directories
+- **Session History**: Browse and resume from previous conversations
+
+#### Enhanced Commands
+- `/session` - Interactive session browser with available sessions and suggested paths
+- `/session list` - Organized session listing grouped by working directory
+- `/session new <path>` - Start new conversation in specific directory
+- `/session . <path>` - Switch to or create session for specific path
+- Displays recent sessions with creation dates and working directories
+- Shows commonly used paths for quick access
+- Intelligently handles path-session relationships (sessions are tied to their workspace directories)
+- Offers session selection when multiple sessions exist for the same path
 
 ### Multi-Session Support (Enhanced)
 - **Concurrent Sessions**: Run multiple Claude conversations simultaneously

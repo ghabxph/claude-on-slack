@@ -232,3 +232,93 @@ func (r *SessionRepository) UpdateChannelState(channelID string, activeSessionID
 
 	return nil
 }
+
+// ListAllSessions returns all sessions with their paths, ordered by most recent
+func (r *SessionRepository) ListAllSessions(limit int) ([]*Session, error) {
+	query := `SELECT * FROM sessions ORDER BY updated_at DESC LIMIT $1`
+	
+	rows, err := r.db.GetDB().Query(query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []*Session
+	for rows.Next() {
+		session := &Session{}
+		err := rows.Scan(&session.ID, &session.SessionID, &session.WorkingDirectory,
+			&session.SystemUser, &session.UserPrompt, &session.CreatedAt, &session.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan session: %w", err)
+		}
+		sessions = append(sessions, session)
+	}
+
+	return sessions, nil
+}
+
+// GetUniqueWorkingDirectories returns unique working directories from all sessions
+func (r *SessionRepository) GetUniqueWorkingDirectories(limit int) ([]string, error) {
+	query := `SELECT DISTINCT working_directory FROM sessions ORDER BY working_directory LIMIT $1`
+	
+	rows, err := r.db.GetDB().Query(query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get unique working directories: %w", err)
+	}
+	defer rows.Close()
+
+	var directories []string
+	for rows.Next() {
+		var dir string
+		err := rows.Scan(&dir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan directory: %w", err)
+		}
+		directories = append(directories, dir)
+	}
+
+	return directories, nil
+}
+
+// GetSessionByID retrieves a session by database ID
+func (r *SessionRepository) GetSessionByID(id int) (*Session, error) {
+	query := `SELECT * FROM sessions WHERE id = $1`
+	
+	session := &Session{}
+	err := r.db.GetDB().QueryRow(query, id).Scan(
+		&session.ID, &session.SessionID, &session.WorkingDirectory,
+		&session.SystemUser, &session.UserPrompt, &session.CreatedAt, &session.UpdatedAt)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // Not found
+		}
+		return nil, fmt.Errorf("failed to get session by ID: %w", err)
+	}
+
+	return session, nil
+}
+
+// GetSessionsByWorkingDirectory returns sessions that match a specific working directory
+func (r *SessionRepository) GetSessionsByWorkingDirectory(workingDir string, limit int) ([]*Session, error) {
+	query := `SELECT * FROM sessions WHERE working_directory = $1 ORDER BY updated_at DESC LIMIT $2`
+	
+	rows, err := r.db.GetDB().Query(query, workingDir, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sessions by working directory: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []*Session
+	for rows.Next() {
+		session := &Session{}
+		err := rows.Scan(&session.ID, &session.SessionID, &session.WorkingDirectory,
+			&session.SystemUser, &session.UserPrompt, &session.CreatedAt, &session.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan session: %w", err)
+		}
+		sessions = append(sessions, session)
+	}
+
+	return sessions, nil
+}

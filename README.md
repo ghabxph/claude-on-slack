@@ -29,6 +29,23 @@ The real reason I built this is to eventually control **all my devices** by just
 
 **Your imagination is your limit** - and now you have the tools to build anything you can dream up! 🎨
 
+## 📸 **Preview: See It In Action**
+
+Here's what natural conversation with your personal AI assistant looks like in Slack:
+
+![Claude on Slack Preview](preview-screenshot.png)
+
+*Real conversation: Planning a PostgreSQL migration through natural chat - no command syntax needed, just talk to your AI like you would a colleague!*
+
+**What you're seeing:**
+- 💬 **Natural Language**: Just chat normally about what you want to accomplish
+- 🤖 **AI Planning**: Your assistant understands complex technical requirements  
+- 📋 **Detailed Responses**: Comprehensive plans, code suggestions, and implementation steps
+- 🔄 **Session Continuity**: Conversations persist across devices and time
+- ⚡ **Real-time**: Immediate responses for coding, debugging, and automation tasks
+
+This is your "Jarvis in chat mode" - working **right now** on real projects! 🚀
+
 ## ⚠️ **Current Limitations & Cost Considerations**
 
 ### 🔗 **Dependency: Claude Code CLI**

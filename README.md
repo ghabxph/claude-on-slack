@@ -33,7 +33,7 @@ The real reason I built this is to eventually control **all my devices** by just
 
 Here's what natural conversation with your personal AI assistant looks like in Slack:
 
-![Claude on Slack Preview](preview-screenshot.png)
+<img width="1348" height="1258" alt="image" src="https://github.com/user-attachments/assets/348341fc-7931-4908-8e56-8cb9a74f1f5c" />
 
 *Real conversation: Planning a PostgreSQL migration through natural chat - no command syntax needed, just talk to your AI like you would a colleague!*
 

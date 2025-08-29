@@ -46,6 +46,20 @@ Here's what natural conversation with your personal AI assistant looks like in S
 
 This is your "Jarvis in chat mode" - working **right now** on real projects! 🚀
 
+### 🖼️ **Image Analysis in Action**
+
+Upload any image and get instant AI analysis - perfect for debugging, technical analysis, or understanding complex diagrams:
+
+<img width="1141" alt="Claude analyzing a TradingView gold chart" src="https://github.com/user-attachments/assets/YOUR_IMAGE_URL_HERE">
+
+*Real example: Upload a TradingView screenshot and Claude provides comprehensive technical analysis including price movements, trend analysis, and trading insights - all through natural conversation!*
+
+**Image Processing Features:**
+- 🔍 **Smart Analysis**: Detailed breakdown of charts, diagrams, code screenshots, and technical content
+- 📊 **Technical Insights**: Understanding of financial charts, system architecture, and data visualizations  
+- 💬 **Conversational**: Just upload and ask questions - no special commands needed
+- 🔄 **Seamless Integration**: Combine image analysis with your ongoing coding and automation conversations
+
 ## ⚠️ **Current Limitations & Cost Considerations**
 
 ### 🔗 **Dependency: Claude Code CLI**

@@ -75,17 +75,34 @@ Worth it? For me, absolutely. Your mileage may vary! 💸
 
 ## 🚀 Quick Start
 
-### 🤖 Recommended Setup Method
+### 🤖 **Golden Rule: Let Claude Do The Heavy Lifting!**
 
-**The easiest way to set up Claude on Slack is to ask Claude itself for help!**
+**Most importantly, to save yourself from headache, just use Claude to help you set this up - like I do!**
 
-Simply open Claude Code CLI and ask:
+**💡 Pro Tip**: I literally ask Claude to set everything up for me. It's the perfect self-referential loop:
+- Use Claude to set up Claude-on-Slack 
+- Claude knows its own integration better than anyone
+- Avoid configuration nightmares and debugging sessions
+
+**Simply open Claude Code CLI and ask:**
 ```
 "Help me set up claude-on-slack from https://github.com/ghabxph/claude-on-slack. 
-I need help with Slack app configuration, environment setup, and deployment."
+I need help with:
+• Slack app creation and OAuth configuration
+• Environment setup (.env file configuration)
+• Database setup (PostgreSQL with Docker)
+• SSH tunneling setup for bastion server
+• Deployment and systemd service configuration"
 ```
 
-Claude will guide you through the entire process, including Slack app creation, permission configuration, and deployment setup.
+**Claude will walk you through**:
+- Slack workspace configuration
+- Bastion server SSH tunneling setup  
+- PostgreSQL database initialization
+- Environment variables configuration
+- Service deployment and monitoring
+
+**Why this works so well**: Claude understands the entire stack, knows common pitfalls, and can troubleshoot issues in real-time. Don't suffer through manual configuration - let the AI do what it does best! 🚀
 
 ### Manual Installation
 

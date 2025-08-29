@@ -2,29 +2,32 @@
 
 **🤖 Your Personal AI Assistant - Jarvis in Chat Mode**
 
-Transform your home network into a smart, AI-powered automation system! Claude on Slack brings Claude Code's powerful AI capabilities directly to your Slack workspace, enabling DIY enthusiasts to control their machines, IoT devices, and entire home network from anywhere in the world through natural conversation.
+**Code from anywhere - even your mobile phone!** Claude on Slack brings the power of programming to your fingertips through natural conversation with AI, accessible wherever you have Slack.
 
-## 🏠 Vision: AI-Powered Home Automation for DIYers
+## 🏠 Vision: The Gateway to AI-Powered Home Automation
 
-Imagine having **Jarvis, but in chat mode** - that's exactly what Claude on Slack delivers! This isn't just another chatbot; it's your personal AI assistant that can:
+Imagine having **Jarvis, but in chat mode** - that's the dream I'm building toward! Right now, this project lets you:
 
-### 🛠️ **Smart Home Integration**
-- **Code & Control IoT Devices**: Write and deploy code to control your smart lights, sensors, cameras, and home automation systems
-- **Remote Machine Management**: SSH into your home servers, deploy applications, monitor system health - all through chat
-- **Real-time Diagnostics**: Ask Claude to check your system logs, analyze performance metrics, or troubleshoot network issues
-- **Automated Workflows**: Create intelligent automation scripts that respond to voice commands via Slack
+### 📱 **Current Reality: Code Anywhere**
+- **Mobile Development**: Write, debug, and deploy code from your phone through Slack chat
+- **Natural Conversation**: No command syntax - just talk to the AI about what you want to build
+- **Persistent Sessions**: Your coding conversations continue across devices and time
+- **Image Analysis**: Upload screenshots of errors, diagrams, or hardware setups for instant feedback
 
-### 🌐 **Anywhere, Anytime Control**
-- **Global Access**: Control your entire home network from anywhere in the world through Slack mobile app
-- **Natural Language Interface**: No more remembering complex commands - just chat naturally with Claude
-- **Image Analysis**: Upload photos of error screens, hardware issues, or project setups for instant AI analysis
-- **Persistent Sessions**: Your conversations and context are maintained across devices and time
+### 🚀 **Future Vision: True Home Control** 
+The real reason I built this is to eventually control **all my devices** by just chatting with the AI. The plan:
 
-### 🔧 **DIY Developer's Dream**
-- **Live Code Analysis**: Upload code files, get instant feedback, suggestions, and bug fixes
-- **Project Management**: Have Claude help manage your DIY projects, track progress, and suggest improvements  
-- **Learning Assistant**: Ask questions about new technologies, get explanations, and learn while building
-- **Documentation Helper**: Generate documentation, README files, and project guides automatically
+- **IoT Integration**: Connect smart lights, sensors, cameras, and home systems (coming soon!)
+- **Remote Machine Control**: Manage home servers, deploy apps, monitor systems - all through chat
+- **Automated Workflows**: Create intelligent scripts that respond to natural language commands
+- **Device Orchestration**: Coordinate multiple systems and devices through conversational AI
+
+### 🔧 **Current State: The Foundation**
+**Honest Reality**: There are no explicit home automation libraries integrated yet - this is the foundation that makes it all possible.
+
+**But here's the magic**: Being able to code through conversation is the **entry point** to controlling anything programmatically! Want to control your lights? Write a script. Need to monitor your servers? Code it up. Want to automate your morning routine? Program it through chat.
+
+**Your imagination is your limit** - and now you have the tools to build anything you can dream up! 🎨
 
 ## 🚀 Quick Start
 

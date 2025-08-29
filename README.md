@@ -29,6 +29,32 @@ The real reason I built this is to eventually control **all my devices** by just
 
 **Your imagination is your limit** - and now you have the tools to build anything you can dream up! 🎨
 
+## ⚠️ **Current Limitations & Cost Considerations**
+
+### 🔗 **Dependency: Claude Code CLI**
+This project is **heavily integrated** with [Claude Code CLI](https://claude.ai/code) - that's both its superpower and current limitation:
+
+- **✅ Pros**: Extremely reliable, powerful AI capabilities, seamless integration
+- **⚠️ Cons**: Requires Anthropic's Claude subscription, not fully self-hosted
+
+### 💰 **Real Cost Reality**  
+**In my home setup, I pay $100/month for Claude Max subscription.**
+
+- **Expensive?** Yes, kinda pricey for a personal setup
+- **Worth it?** For me, totally worth it - but I understand it's a barrier for many
+- **Future Goal**: Make this setup cheaper with alternative LLM integrations
+
+### 🔮 **Future Alternatives (Maybe)**
+Looking toward more self-hosted friendly options:
+
+- **[AIDE](https://github.com/paul-gauthier/aider)**: Potential integration for local LLM support
+- **Custom Agent Development**: May develop custom agents for other LLMs  
+- **Cost Reduction**: Working toward cheaper, self-hosted alternatives
+- **Current Reality**: Claude Code CLI remains the main core due to reliability
+
+### 🎯 **Bottom Line**
+Right now, if you want the full experience, you'll need Claude Max subscription. But the foundation is here - and the future might bring cheaper alternatives!
+
 ## 🚀 Quick Start
 
 ### 🤖 Recommended Setup Method

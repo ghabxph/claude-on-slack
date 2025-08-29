@@ -40,12 +40,16 @@ func (n *DeploymentNotifier) FormatDeploymentMessage(version string, changes []s
 			message += fmt.Sprintf("• %s\n", change)
 		}
 	} else {
-		message += "• PostgreSQL migration and session persistence\n"
-		message += "• Enhanced database-backed conversation chains\n"
-		message += "• Improved session management with O(1) performance\n"
+		message += "• 🔧 **Enhanced Reliability** - Application-level auto-restart with failure recovery\n"
+		message += "• 🐛 **System Compatibility** - Fixed systemd environment compatibility issues\n"
+		message += "• 🗄️ **Database Connection** - Resolved PostgreSQL networking and authentication\n"
+		message += "• 🔄 **Better Error Handling** - Improved startup validation and error reporting\n"
+		message += "• 🛡️ **Connection Resilience** - Added retry logic with exponential backoff\n"
+		message += "• ⚡ **HTTP Server** - Enhanced server startup and error propagation\n"
 	}
 	
-	message += "\n✅ All systems operational"
+	message += "\n📋 *Full details*: See <https://github.com/ghabxph/claude-on-slack/blob/main/CHANGELOG.md|CHANGELOG.md>\n"
+	message += "✅ All systems operational"
 	
 	return message
 }

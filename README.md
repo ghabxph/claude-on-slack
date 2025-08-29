@@ -1,26 +1,56 @@
 # Claude on Slack
 
-A Slack bot that enables natural language interaction with Claude Code directly in Slack channels, providing seamless AI assistance for development teams.
+**🤖 Your Personal AI Assistant - Jarvis in Chat Mode**
 
-## 🎯 Overview
+Transform your home network into a smart, AI-powered automation system! Claude on Slack brings Claude Code's powerful AI capabilities directly to your Slack workspace, enabling DIY enthusiasts to control their machines, IoT devices, and entire home network from anywhere in the world through natural conversation.
 
-Claude on Slack bridges the gap between Slack conversations and Claude Code's powerful AI capabilities, allowing teams to:
+## 🏠 Vision: AI-Powered Home Automation for DIYers
 
-- Have natural conversations with Claude without command parsing
-- Maintain session context across multiple interactions  
-- Collaborate on code analysis, debugging, and development tasks
-- Access Claude's file operations, code generation, and analysis tools
-- Control permissions and access levels through slash commands
+Imagine having **Jarvis, but in chat mode** - that's exactly what Claude on Slack delivers! This isn't just another chatbot; it's your personal AI assistant that can:
+
+### 🛠️ **Smart Home Integration**
+- **Code & Control IoT Devices**: Write and deploy code to control your smart lights, sensors, cameras, and home automation systems
+- **Remote Machine Management**: SSH into your home servers, deploy applications, monitor system health - all through chat
+- **Real-time Diagnostics**: Ask Claude to check your system logs, analyze performance metrics, or troubleshoot network issues
+- **Automated Workflows**: Create intelligent automation scripts that respond to voice commands via Slack
+
+### 🌐 **Anywhere, Anytime Control**
+- **Global Access**: Control your entire home network from anywhere in the world through Slack mobile app
+- **Natural Language Interface**: No more remembering complex commands - just chat naturally with Claude
+- **Image Analysis**: Upload photos of error screens, hardware issues, or project setups for instant AI analysis
+- **Persistent Sessions**: Your conversations and context are maintained across devices and time
+
+### 🔧 **DIY Developer's Dream**
+- **Live Code Analysis**: Upload code files, get instant feedback, suggestions, and bug fixes
+- **Project Management**: Have Claude help manage your DIY projects, track progress, and suggest improvements  
+- **Learning Assistant**: Ask questions about new technologies, get explanations, and learn while building
+- **Documentation Helper**: Generate documentation, README files, and project guides automatically
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### 🤖 Recommended Setup Method
+
+**The easiest way to set up Claude on Slack is to ask Claude itself for help!**
+
+Simply open Claude Code CLI and ask:
+```
+"Help me set up claude-on-slack from https://github.com/ghabxph/claude-on-slack. 
+I need help with Slack app configuration, environment setup, and deployment."
+```
+
+Claude will guide you through the entire process, including Slack app creation, permission configuration, and deployment setup.
+
+### Manual Installation
+
+If you prefer to set up manually, here are the prerequisites and steps:
+
+#### Prerequisites
 
 - [Claude Code](https://github.com/anthropics/claude-code) installed and configured
-- Slack workspace with bot creation permissions
+- Slack workspace with bot creation permissions  
 - Go 1.21+ for building the service
 
-### Installation
+#### Installation Steps
 
 1. **Clone the repository**
    ```bash
@@ -81,6 +111,28 @@ SERVER_PORT=8080
 # Working directory (set to your home directory for full system access)
 WORKING_DIRECTORY=/home/yourusername
 ```
+
+### Slack App Configuration
+
+For image processing support, ensure your Slack app has the following OAuth permissions:
+
+#### Bot Token Scopes (Required):
+- `app_mentions:read` - Read mentions of the bot
+- `channels:read` - Read channel information  
+- `chat:write` - Send messages as the bot
+- `files:read` - **Download and analyze uploaded images**
+- `users:read` - Read user information
+
+#### Event Subscriptions (Required):
+- `app_mention` - When someone mentions the bot
+- `message.channels` - Messages in channels where bot is member
+- `message.groups` - Messages in private channels  
+- `message.im` - Direct messages to the bot
+- `file_shared` - **When files/images are shared**
+
+#### Features and Functionality:
+- ✅ **Slash Commands** - For `/session`, `/permission` commands
+- ✅ **Bots** - Enable bot user
 
 ## 📖 Usage
 
@@ -177,11 +229,54 @@ sudo systemctl status slack-claude-bot
 sudo journalctl -u slack-claude-bot -f
 ```
 
+## 🌟 Open Source Philosophy
+
+**Fork It. It's Yours. Adapt the Open Source Culture.**
+
+This project is my personal contribution to the world 🌍 - a working example of how AI can transform your home into a smart, automated environment. I use this daily in my own home setup and am sharing it with the DIY community.
+
+### 🚨 **Important Notes:**
+- **No Pull Requests Accepted**: This is my personal home automation system. I won't be accepting PRs as this could affect my home setup
+- **Fork & Modify**: Feel free to fork this project and make it your own! Adapt it to your needs, add your own features
+- **You're On Your Own**: For any issues with your fork or modifications, you'll need to debug and fix them yourself
+- **Community Spirit**: I encourage you to share your forks and improvements with others in the DIY community
+
+### 💡 **Recommended Approach:**
+1. **Fork** this repository
+2. **Study** the code to understand how it works  
+3. **Adapt** it to your specific home automation needs
+4. **Experiment** with IoT integrations, custom commands, and automation workflows
+5. **Share** your innovations with the community (but maintain your own fork)
+
+This is how open source should work - take what's useful, make it better for your needs, and contribute back to the ecosystem by sharing your innovations!
+
 ## 📄 License
 
 This project is open source and available under the [MIT License](LICENSE).
 
 ## 🆕 Latest Features
+
+### Image Processing Support (v2.1.0)
+
+Upload and analyze images directly in Slack conversations:
+
+#### Key Features
+- **Multi-format Support**: JPEG, PNG, GIF, and WebP image analysis
+- **Automatic Processing**: Upload images and Claude analyzes them automatically
+- **Natural Integration**: Combine image analysis with text conversations
+- **Smart Storage**: Temporary storage with automatic cleanup (2-hour retention)
+- **File Security**: Size limits (50MB), format validation, and safe handling
+
+#### Usage
+Simply upload an image to any channel where the bot is active:
+- Drop an image file into the chat
+- Add optional text: "What's in this image? Can you explain the architecture?"
+- Claude will download, analyze, and respond with detailed insights
+
+#### Requirements
+- Slack bot requires `files:read` OAuth scope for image downloads
+- Automatic storage directory creation at `/tmp/claude-slack-images/`
+- Background cleanup service runs every 30 minutes
 
 ### PostgreSQL Session Persistence (v2.0.0)
 

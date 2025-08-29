@@ -11,8 +11,10 @@ import (
 type SessionManager interface {
 	// Session lifecycle
 	CreateSession(userID, channelID string) (SessionInfo, error)
+	CreateSessionWithPath(userID, channelID, workingDir string) (SessionInfo, error)
 	GetOrCreateSession(userID, channelID string) (SessionInfo, error)
 	CloseSession(sessionID string) error
+	DeleteSession(sessionID string) error
 
 	// Session operations
 	UpdateSessionActivity(sessionID string) error
@@ -35,6 +37,7 @@ type SessionManager interface {
 	GetActiveSessionsForUser(userID string) []SessionInfo
 	ListUserSessions(userID string) string
 	GetSessionStats() map[string]interface{}
+	GetTotalMessageCount(sessionID string) (int, error)
 
 	// Session listing and paths (for enhanced /session command)
 	ListAllSessions(limit int) ([]SessionInfo, error)

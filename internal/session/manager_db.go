@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"os/user"
 	"sync"
 	"time"
 
@@ -42,7 +43,7 @@ func NewDatabaseManager(cfg *config.Config, logger *zap.Logger, executor *claude
 }
 
 // CreateSession creates a new database-backed session
-func (m *DatabaseManager) CreateSession(userID, channelID string) (*repository.Session, error) {
+func (m *DatabaseManager) CreateSession(userID, channelID string) (SessionInfo, error) {
 	// Generate session ID
 	sessionID := uuid.New().String()
 
@@ -52,11 +53,18 @@ func (m *DatabaseManager) CreateSession(userID, channelID string) (*repository.S
 		return nil, fmt.Errorf("failed to create workspace: %w", err)
 	}
 
+	// Get actual system user (not Slack user ID) with fallback for systemd
+	systemUser, err := user.Current()
+	systemUsername := "claude-bot" // Default fallback for systemd
+	if err == nil {
+		systemUsername = systemUser.Username
+	}
+
 	// Create session in database
 	session := &repository.Session{
 		SessionID:        sessionID,
 		WorkingDirectory: workspaceDir,
-		SystemUser:       userID,
+		SystemUser:       systemUsername,
 		UserPrompt:       nil, // Will be set when user sends first message
 	}
 
@@ -87,11 +95,55 @@ func (m *DatabaseManager) CreateSession(userID, channelID string) (*repository.S
 		zap.String("workspace", workspaceDir),
 		zap.Int("db_id", session.ID))
 
-	return session, nil
+	return &DbSessionInfo{session}, nil
+}
+
+// CreateSessionWithPath creates a new session with a specific working directory
+func (m *DatabaseManager) CreateSessionWithPath(userID, channelID, workingDir string) (SessionInfo, error) {
+	// Generate session ID
+	sessionID := uuid.New().String()
+
+	// Get actual system user (not Slack user ID) with fallback for systemd
+	systemUser, err := user.Current()
+	systemUsername := "claude-bot" // Default fallback for systemd
+	if err == nil {
+		systemUsername = systemUser.Username
+	}
+
+	// Create session in database with specified working directory
+	session := &repository.Session{
+		SessionID:        sessionID,
+		WorkingDirectory: workingDir,
+		SystemUser:       systemUsername,
+		UserPrompt:       nil, // Will be set when user sends first message
+	}
+
+	if err := m.repository.CreateSession(session); err != nil {
+		return nil, fmt.Errorf("failed to create session in database: %w", err)
+	}
+
+	// Update channel state to point to new session
+	if err := m.repository.UpdateChannelState(channelID, &session.ID, nil); err != nil {
+		m.logger.Error("Failed to update channel state", zap.Error(err))
+	}
+
+	// Cache in memory for O(1) lookup
+	m.mu.Lock()
+	m.sessionLookup[sessionID] = session
+	m.mu.Unlock()
+
+	m.logger.Info("Created new database session with custom path",
+		zap.String("session_id", sessionID),
+		zap.String("user_id", userID),
+		zap.String("channel_id", channelID),
+		zap.String("working_dir", workingDir),
+		zap.Int("db_id", session.ID))
+
+	return &DbSessionInfo{session}, nil
 }
 
 // GetOrCreateSession gets existing session for channel or creates new one
-func (m *DatabaseManager) GetOrCreateSession(userID, channelID string) (*repository.Session, error) {
+func (m *DatabaseManager) GetOrCreateSession(userID, channelID string) (SessionInfo, error) {
 	// Check channel state for existing active session
 	channelState, err := m.repository.GetChannelState(channelID)
 	if err != nil {
@@ -106,7 +158,7 @@ func (m *DatabaseManager) GetOrCreateSession(userID, channelID string) (*reposit
 				zap.Error(err), 
 				zap.Int("session_id", *channelState.ActiveSessionID))
 		} else {
-			return session, nil
+			return &DbSessionInfo{session}, nil
 		}
 	}
 
@@ -359,6 +411,141 @@ func (s *DbSessionInfo) GetPermissionMode() config.PermissionMode { return confi
 func (s *DbSessionInfo) GetCreatedAt() time.Time               { return s.CreatedAt }
 func (s *DbSessionInfo) GetLastActivity() time.Time            { return s.UpdatedAt }
 func (s *DbSessionInfo) IsActive() bool                        { return true } // DB sessions are considered active
+
+// GetTotalMessageCount gets the total message count for a session including its root parent
+func (m *DatabaseManager) GetTotalMessageCount(sessionID string) (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	
+	// Find the session by session ID
+	session, exists := m.sessionLookup[sessionID]
+	if !exists {
+		// Try to load from database
+		dbSession, err := m.repository.GetSessionBySessionID(sessionID)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get session: %w", err)
+		}
+		if dbSession == nil {
+			return 0, fmt.Errorf("session not found")
+		}
+		session = dbSession
+	}
+	
+	// Count total messages in the conversation tree using root parent ID
+	return m.repository.CountMessagesInConversationTree(session.ID)
+}
+
+// AddMessageToSession adds a message to session history (database implementation)
+func (m *DatabaseManager) AddMessageToSession(sessionID string, message claude.Message) error {
+	// For database sessions, we handle messages differently through ProcessUserMessage/ProcessAIResponse
+	// This method can be a no-op or we can log the message
+	m.logger.Debug("AddMessageToSession called for database session", 
+		zap.String("session_id", sessionID),
+		zap.String("role", message.Role))
+	return nil
+}
+
+// CloseSession closes a database session
+func (m *DatabaseManager) CloseSession(sessionID string) error {
+	// Remove from memory cache
+	m.mu.Lock()
+	delete(m.sessionLookup, sessionID)
+	m.mu.Unlock()
+	
+	m.logger.Info("Closed database session", zap.String("session_id", sessionID))
+	return nil
+}
+
+// UpdateSessionActivity updates the last activity time for a session
+func (m *DatabaseManager) UpdateSessionActivity(sessionID string) error {
+	// Database sessions are updated automatically when messages are processed
+	m.logger.Debug("UpdateSessionActivity called", zap.String("session_id", sessionID))
+	return nil
+}
+
+// CheckRateLimit checks if a session is rate limited (database implementation)
+func (m *DatabaseManager) CheckRateLimit(sessionID string) (bool, time.Duration, error) {
+	// Database sessions don't implement rate limiting yet
+	return false, 0, nil
+}
+
+// SetPermissionMode sets the permission mode for a database session
+func (m *DatabaseManager) SetPermissionMode(sessionID string, mode config.PermissionMode) error {
+	// Database sessions don't store permission mode yet - could be added to schema
+	m.logger.Debug("SetPermissionMode called", 
+		zap.String("session_id", sessionID),
+		zap.String("mode", string(mode)))
+	return nil
+}
+
+// GetPermissionMode gets the permission mode for a database session
+func (m *DatabaseManager) GetPermissionMode(sessionID string) (config.PermissionMode, error) {
+	// Return default mode for now
+	return config.PermissionModeDefault, nil
+}
+
+// UpdateLatestResponse updates the latest response for a database session
+func (m *DatabaseManager) UpdateLatestResponse(sessionID string, response string) error {
+	// This would be handled by ProcessAIResponse in database sessions
+	m.logger.Debug("UpdateLatestResponse called", zap.String("session_id", sessionID))
+	return nil
+}
+
+// UpdateCurrentWorkDir updates the current working directory for a database session
+func (m *DatabaseManager) UpdateCurrentWorkDir(sessionID string, workDir string) error {
+	// Database sessions use the workspace directory from creation
+	m.logger.Debug("UpdateCurrentWorkDir called", 
+		zap.String("session_id", sessionID),
+		zap.String("work_dir", workDir))
+	return nil
+}
+
+// QueueMessage queues a message for processing (database implementation)
+func (m *DatabaseManager) QueueMessage(sessionID string, message string) (bool, error) {
+	// Database sessions don't use message queuing in the same way
+	return false, nil
+}
+
+// SetProcessing sets the processing status for a database session
+func (m *DatabaseManager) SetProcessing(sessionID string, processing bool) error {
+	// Database sessions don't track processing status in memory
+	return nil
+}
+
+// GetQueuedMessages gets queued messages for a database session
+func (m *DatabaseManager) GetQueuedMessages(sessionID string) ([]string, error) {
+	// Database sessions don't use message queuing
+	return nil, nil
+}
+
+// IsProcessing checks if a database session is processing
+func (m *DatabaseManager) IsProcessing(sessionID string) bool {
+	// Database sessions don't track processing status
+	return false
+}
+
+// GetActiveSessionsForUser gets active sessions for a user (database implementation)
+func (m *DatabaseManager) GetActiveSessionsForUser(userID string) []SessionInfo {
+	// This would require a database query - for now return empty
+	return []SessionInfo{}
+}
+
+// ListUserSessions returns a formatted list of user sessions (database implementation)
+func (m *DatabaseManager) ListUserSessions(userID string) string {
+	// This would require database queries to format session list
+	return "Database session listing not yet implemented."
+}
+
+// DeleteSession deletes a session from the database
+func (m *DatabaseManager) DeleteSession(sessionID string) error {
+	// Remove from memory cache
+	m.mu.Lock()
+	delete(m.sessionLookup, sessionID)
+	m.mu.Unlock()
+
+	// Delete from database
+	return m.repository.DeleteSession(sessionID)
+}
 
 // Stop cleanup resources (no background routines in database mode)
 func (m *DatabaseManager) Stop() {

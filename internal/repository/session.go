@@ -322,3 +322,74 @@ func (r *SessionRepository) GetSessionsByWorkingDirectory(workingDir string, lim
 
 	return sessions, nil
 }
+// CountMessagesInConversationTree counts total messages (both user and AI) in the conversation tree
+func (r *SessionRepository) CountMessagesInConversationTree(rootParentID int) (int, error) {
+	// Count child sessions (each child session represents a user-AI exchange)
+	// Each child session has both user prompt and AI response, so it counts as 2 messages
+	query := `SELECT COUNT(*) FROM child_sessions WHERE root_parent_id = $1`
+	
+	var childCount int
+	err := r.db.GetDB().QueryRow(query, rootParentID).Scan(&childCount)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count child sessions: %w", err)
+	}
+	
+	// Each child session represents a user-AI exchange (2 messages)
+	// Plus the initial user prompt from the root session (1 message)
+	totalMessages := (childCount * 2) + 1
+	
+	r.logger.Debug("Counted messages in conversation tree",
+		zap.Int("root_parent_id", rootParentID),
+		zap.Int("child_sessions", childCount),
+		zap.Int("total_messages", totalMessages))
+	
+	return totalMessages, nil
+}
+
+// DeleteSession deletes a session and all its associated child sessions
+func (r *SessionRepository) DeleteSession(sessionID string) error {
+	// First, get the session to get its ID for deleting child sessions
+	session, err := r.GetSessionBySessionID(sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to find session to delete: %w", err)
+	}
+
+	// Start transaction
+	tx, err := r.db.GetDB().Begin()
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete all child sessions first
+	deleteChildQuery := `DELETE FROM child_sessions WHERE root_parent_id = $1`
+	_, err = tx.Exec(deleteChildQuery, session.ID)
+	if err != nil {
+		return fmt.Errorf("failed to delete child sessions: %w", err)
+	}
+
+	// Clear any channel state pointing to this session
+	clearChannelQuery := `UPDATE slack_channels SET active_session_id = NULL WHERE active_session_id = $1`
+	_, err = tx.Exec(clearChannelQuery, session.ID)
+	if err != nil {
+		return fmt.Errorf("failed to clear channel state: %w", err)
+	}
+
+	// Delete the parent session
+	deleteSessionQuery := `DELETE FROM sessions WHERE session_id = $1`
+	_, err = tx.Exec(deleteSessionQuery, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to delete session: %w", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	r.logger.Info("Deleted session and its child sessions",
+		zap.String("session_id", sessionID),
+		zap.Int("db_id", session.ID))
+
+	return nil
+}

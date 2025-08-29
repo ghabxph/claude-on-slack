@@ -2,7 +2,7 @@
 
 set -e  # Exit on any error
 
-echo "🚀 Starting claude-on-slack redeploy v2.0.0..."
+echo "🚀 Starting claude-on-slack redeploy v2.2.3..."
 
 # Configuration
 SERVICE_NAME="slack-claude-bot"
@@ -58,15 +58,30 @@ fi
 
 sleep 2
 
-# 3. Deploy binary to /opt/claude-on-slack/
+# 3. Deploy binary and environment file to /opt/claude-on-slack/
 echo "Deploying binary to /opt/claude-on-slack/claude-on-slack..."
 sudo cp "$TEMP_BINARY" /opt/claude-on-slack/claude-on-slack
 sudo chmod +x /opt/claude-on-slack/claude-on-slack
 rm -f "$TEMP_BINARY"
 
+echo "Deploying .env file to /opt/claude-on-slack/.env..."
+if [ -f ".env" ]; then
+    sudo cp .env /opt/claude-on-slack/.env
+    sudo chmod 600 /opt/claude-on-slack/.env
+    echo "✅ Environment file deployed"
+else
+    echo "⚠️  Warning: .env file not found in project directory"
+fi
+
 echo "✅ Binary deployed successfully:"
 ls -la /opt/claude-on-slack/claude-on-slack
 echo "SHA256: $(sudo sha256sum /opt/claude-on-slack/claude-on-slack)"
+
+# Update systemd service to use the secure environment file path
+echo "Updating systemd service environment file path..."
+sudo sed -i 's|EnvironmentFile=.*|EnvironmentFile=-/opt/claude-on-slack/.env|g' /etc/systemd/system/claude-on-slack.service
+sudo systemctl daemon-reload
+echo "✅ Systemd service updated to use /opt/claude-on-slack/.env"
 
 # Determine docker compose command
 if command -v docker-compose >/dev/null 2>&1; then
@@ -81,8 +96,14 @@ $DOCKER_COMPOSE up -d postgres
 
 # 4. Wait for database readiness
 echo "Waiting for database to be ready..."
+# Extract database credentials from .env (safer than sourcing)
+if [ -f ".env" ]; then
+    DB_USER=$(grep "^DB_USER=" .env | cut -d'=' -f2)
+    DB_NAME=$(grep "^DB_NAME=" .env | cut -d'=' -f2)
+    DB_PASSWORD=$(grep "^DB_PASSWORD=" .env | cut -d'=' -f2)
+fi
 for i in {1..30}; do
-    if $DOCKER_COMPOSE exec -T postgres pg_isready -U claude_bot -d claude_slack; then
+    if $DOCKER_COMPOSE exec -T postgres pg_isready -U ${DB_USER:-claude_bot} -d ${DB_NAME:-claude_slack}; then
         echo "Database is ready!"
         break
     fi
@@ -96,9 +117,9 @@ done
 # 5. Run database migrations
 echo "Running database migrations..."
 if [ -f "migrations/001_initial_schema.sql" ]; then
-    $DOCKER_COMPOSE exec -T postgres psql -U claude_bot -d claude_slack -f /host_migrations/001_initial_schema.sql || true
-    $DOCKER_COMPOSE exec -T postgres psql -U claude_bot -d claude_slack -f /host_migrations/002_indexes.sql || true
-    $DOCKER_COMPOSE exec -T postgres psql -U claude_bot -d claude_slack -f /host_migrations/003_initial_data.sql || true
+    $DOCKER_COMPOSE exec -T postgres psql -U ${DB_USER:-claude_bot} -d ${DB_NAME:-claude_slack} -f /host_migrations/001_initial_schema.sql || true
+    $DOCKER_COMPOSE exec -T postgres psql -U ${DB_USER:-claude_bot} -d ${DB_NAME:-claude_slack} -f /host_migrations/002_indexes.sql || true
+    $DOCKER_COMPOSE exec -T postgres psql -U ${DB_USER:-claude_bot} -d ${DB_NAME:-claude_slack} -f /host_migrations/003_initial_data.sql || true
 fi
 
 # 4. Start services back up

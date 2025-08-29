@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"bytes"
 	"context"
 	"math"
 	"crypto/hmac"
@@ -26,8 +25,11 @@ import (
 	"github.com/ghabxph/claude-on-slack/internal/auth"
 	"github.com/ghabxph/claude-on-slack/internal/claude"
 	"github.com/ghabxph/claude-on-slack/internal/config"
+	"github.com/ghabxph/claude-on-slack/internal/database"
+	"github.com/ghabxph/claude-on-slack/internal/files"
 	"github.com/ghabxph/claude-on-slack/internal/notifications"
 	"github.com/ghabxph/claude-on-slack/internal/session"
+	"github.com/ghabxph/claude-on-slack/internal/version"
 )
 
 // Service represents the main bot service
@@ -38,8 +40,10 @@ type Service struct {
 	socketClient   *socketmode.Client
 	httpServer     *http.Server
 	authService    *auth.Service
-	sessionManager *session.Manager
+	sessionManager session.SessionManager
 	claudeExecutor *claude.Executor
+	fileDownloader *files.Downloader
+	fileCleanup    *files.CleanupService
 	stopCh         chan struct{}
 	wg             sync.WaitGroup
 	botUserID      string
@@ -64,7 +68,23 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Claude executor: %w", err)
 	}
-	sessionManager := session.NewManager(cfg, logger, claudeExecutor)
+	
+	// Initialize database with retry logic
+	db, err := database.NewDatabase(&cfg.Database, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	
+	// Use database-backed session manager
+	sessionManager := session.NewDatabaseManager(cfg, logger, claudeExecutor, db)
+
+	// Initialize file downloader
+	storageDir := "/tmp/claude-slack-images"
+	fileDownloader, err := files.NewDownloader(slackAPI, logger, storageDir, cfg.SlackBotToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file downloader: %w", err)
+	}
+	fileCleanup := files.NewCleanupService(fileDownloader, logger)
 
 	service := &Service{
 		config:         cfg,
@@ -74,6 +94,8 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 		authService:    authService,
 		sessionManager: sessionManager,
 		claudeExecutor: claudeExecutor,
+		fileDownloader: fileDownloader,
+		fileCleanup:    fileCleanup,
 		stopCh:         make(chan struct{}),
 		startTime:      time.Now(),
 	}
@@ -87,6 +109,7 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 // Start starts the bot service
 func (s *Service) Start(ctx context.Context) error {
 	s.logger.Info("Starting Claude on Slack bot",
+		zap.String("version", version.GetVersion()),
 		zap.String("bot_name", s.config.BotName),
 		zap.String("command_prefix", s.config.CommandPrefix))
 
@@ -111,11 +134,22 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	// Start HTTP server for Events API
+	httpServerErrCh := make(chan error, 1)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.startHTTPServer()
+		if err := s.startHTTPServer(); err != nil {
+			httpServerErrCh <- fmt.Errorf("HTTP server failed: %w", err)
+		}
 	}()
+	
+	// Check if HTTP server started successfully
+	select {
+	case err := <-httpServerErrCh:
+		return err
+	case <-time.After(2 * time.Second):
+		s.logger.Info("HTTP server startup check passed")
+	}
 
 	// Start event handling for Socket Mode
 	s.wg.Add(1)
@@ -129,6 +163,13 @@ func (s *Service) Start(ctx context.Context) error {
 	go func() {
 		defer s.wg.Done()
 		s.periodicCleanup()
+	}()
+
+	// Start file cleanup service
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.fileCleanup.Start(ctx)
 	}()
 
 	// Start socket mode client (will only work if app is configured for Socket Mode)
@@ -232,6 +273,14 @@ func (s *Service) handleEventsAPIEvent(event *slackevents.EventsAPIEvent) {
 				return
 			}
 			s.handleMentionEvent(mentionEvent)
+
+		case "file_shared":
+			fileEvent, ok := innerEvent.Data.(*slackevents.FileSharedEvent)
+			if !ok {
+				s.logger.Warn("Failed to type assert file shared event")
+				return
+			}
+			s.handleFileSharedEvent(fileEvent)
 		}
 	}
 }
@@ -283,6 +332,17 @@ func (s *Service) handleMentionEvent(event *slackevents.AppMentionEvent) {
 	}
 
 	s.handleMessageEvent(messageEvent)
+}
+
+// handleFileSharedEvent handles file shared events
+func (s *Service) handleFileSharedEvent(event *slackevents.FileSharedEvent) {
+	s.logger.Debug("File shared event received", 
+		zap.String("fileID", event.FileID))
+
+	// Note: File shared events don't contain user or channel info directly
+	// We need to get file info to find where it was shared
+	// For now, we'll just log it - the actual file processing happens
+	// when the file is shared in a message event with Files field
 }
 
 // handleSlashCommand handles slash commands
@@ -391,6 +451,53 @@ func (s *Service) processCommand(ctx context.Context, event *slackevents.Message
 
 // processClaudeMessage processes Claude conversation messages
 func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.MessageEvent, text string) string {
+	// Process file attachments if present
+	downloadedFiles := []*files.FileInfo{}
+	if len(event.Files) > 0 {
+		for _, file := range event.Files {
+			// Only process image files
+			if s.IsImageMimeType(file.Mimetype) {
+				s.logger.Info("Processing image attachment", 
+					zap.String("fileID", file.ID), 
+					zap.String("filename", file.Name),
+					zap.String("mimetype", file.Mimetype))
+
+				fileInfo, err := s.fileDownloader.DownloadFile(file.ID, event.User)
+				if err != nil {
+					s.logger.Error("Failed to download image", 
+						zap.String("fileID", file.ID), 
+						zap.Error(err))
+					return fmt.Sprintf("❌ Failed to process image %s: %v", file.Name, err)
+				}
+				downloadedFiles = append(downloadedFiles, fileInfo)
+			}
+		}
+	}
+
+	// Add image references to the text if files were downloaded
+	if len(downloadedFiles) > 0 {
+		imagePrompts := []string{}
+		for _, fileInfo := range downloadedFiles {
+			imagePrompts = append(imagePrompts, fmt.Sprintf("Please analyze the image at %s", fileInfo.LocalPath))
+		}
+		
+		if text != "" {
+			text = strings.Join(imagePrompts, ". ") + ". " + text
+		} else {
+			text = strings.Join(imagePrompts, ". ")
+		}
+	}
+
+	// Schedule cleanup of downloaded files
+	defer func() {
+		for _, fileInfo := range downloadedFiles {
+			go func(path string) {
+				time.Sleep(5 * time.Minute) // Wait 5 minutes before cleanup
+				s.fileDownloader.CleanupFile(path)
+			}(fileInfo.LocalPath)
+		}
+	}()
+
 	// Get or create session
 	userSession, err := s.sessionManager.GetOrCreateSession(event.User, event.Channel)
 	if err != nil {
@@ -399,7 +506,7 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 	}
 
 	// Check if we should queue this message
-	queued, err := s.sessionManager.QueueMessage(userSession.ID, text)
+	queued, err := s.sessionManager.QueueMessage(userSession.GetID(), text)
 	if err != nil {
 		s.logger.Error("Failed to check message queue", zap.Error(err))
 		return fmt.Sprintf("❌ Failed to process message: %v", err)
@@ -410,7 +517,7 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 	}
 
 	// Check rate limiting
-	limited, remaining, err := s.sessionManager.CheckRateLimit(userSession.ID)
+	limited, remaining, err := s.sessionManager.CheckRateLimit(userSession.GetID())
 	if err != nil {
 		s.logger.Error("Rate limit check failed", zap.Error(err))
 		return "❌ Failed to check rate limit"
@@ -421,14 +528,14 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 	}
 
 	// Mark as processing
-	if err := s.sessionManager.SetProcessing(userSession.ID, true); err != nil {
+	if err := s.sessionManager.SetProcessing(userSession.GetID(), true); err != nil {
 		s.logger.Error("Failed to set processing state", zap.Error(err))
 		return fmt.Sprintf("❌ Failed to process message: %v", err)
 	}
-	defer s.sessionManager.SetProcessing(userSession.ID, false)
+	defer s.sessionManager.SetProcessing(userSession.GetID(), false)
 
 	// Get any queued messages and combine with current message
-	queuedMessages, err := s.sessionManager.GetQueuedMessages(userSession.ID)
+	queuedMessages, err := s.sessionManager.GetQueuedMessages(userSession.GetID())
 	if err != nil {
 		s.logger.Error("Failed to get queued messages", zap.Error(err))
 		return fmt.Sprintf("❌ Failed to process message: %v", err)
@@ -440,14 +547,14 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 
 	// Send "Thinking..." message immediately and capture for deletion
 	// Get current mode
-	currentMode, err := s.sessionManager.GetPermissionMode(userSession.ID)
+	currentMode, err := s.sessionManager.GetPermissionMode(userSession.GetID())
 	if err != nil {
 		currentMode = config.PermissionModeDefault
 	}
 	
 	// Format Thinking message with Mode, Session, and Working Dir
-	thinkingMsg := fmt.Sprintf("🤔 Thinking... (Mode: `%s`, Session: `%s`, Working Dir: `%s`)",
-		currentMode, userSession.ClaudeSessionID, userSession.CurrentWorkDir)
+	thinkingMsg := fmt.Sprintf("🤔 _Thinking..._\n\n_• Mode: `%s`\n• Session: `%s`\n• Working Dir: `%s`_",
+		currentMode, userSession.GetID(), userSession.GetCurrentWorkDir())
 	
 	_, thinkingTimestamp, err := s.slackAPI.PostMessage(event.Channel, slack.MsgOptionText(thinkingMsg, false))
 	if err != nil {
@@ -481,47 +588,46 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 		allowedTools = filteredTools
 	}
 
-	// Lock session to prevent concurrent executions
-	userSession.ExecutionMutex.Lock()
-	defer userSession.ExecutionMutex.Unlock()
+	// For database sessions, we handle concurrency differently
+	// TODO: Implement database-level session locking if needed
 
-	// Determine if this is a new Claude session or continuation
-	isNewSession := userSession.ClaudeSessionID == ""
-	claudeSessionID := userSession.ClaudeSessionID
-	if isNewSession {
-		claudeSessionID = userSession.ID // Use our session ID for new Claude sessions
+	// For database sessions, use session ID as Claude session ID
+	claudeSessionID := userSession.GetID()
+	
+	// Check if this is the first message in the session (to determine --session-id vs --resume)
+	messageCount, err := s.sessionManager.GetTotalMessageCount(userSession.GetID())
+	if err != nil {
+		s.logger.Debug("Failed to get message count, assuming new session", zap.Error(err))
+		messageCount = 0
 	}
+	isNewSession := messageCount == 0 // First message uses --session-id, subsequent use --resume
 
 	// Get permission mode
-	permMode, err := s.sessionManager.GetPermissionMode(userSession.ID)
-	if err != nil {
-		s.logger.Error("Failed to get permission mode", zap.Error(err))
+	permMode, permErr := s.sessionManager.GetPermissionMode(userSession.GetID())
+	if permErr != nil {
+		s.logger.Error("Failed to get permission mode", zap.Error(permErr))
 		permMode = config.PermissionModeDefault
 	}
 
 	// Process with Claude Code CLI
-	response, newClaudeSessionID, cost, rawJSON, err := s.claudeExecutor.ProcessClaudeCodeRequest(ctx, text, claudeSessionID, event.User, allowedTools, isNewSession, permMode)
+	response, newClaudeSessionID, cost, rawJSON, err := s.claudeExecutor.ProcessClaudeCodeRequest(ctx, text, claudeSessionID, event.User, userSession.GetCurrentWorkDir(), allowedTools, isNewSession, permMode)
 	if err != nil {
 		s.logger.Error("Claude Code processing failed", zap.Error(err))
 		return fmt.Sprintf("❌ Claude Code processing failed: %v", err)
 	}
 	
 	// Store the latest response (raw JSON)
-	if err := s.sessionManager.UpdateLatestResponse(userSession.ID, rawJSON); err != nil {
+	if err := s.sessionManager.UpdateLatestResponse(userSession.GetID(), rawJSON); err != nil {
 		s.logger.Error("Failed to update latest response", zap.Error(err))
 	}
 
-	// Update the Claude session ID for future requests
-	userSession.ClaudeSessionID = newClaudeSessionID
+	// For database sessions, Claude session ID is derived from session ID
+	// No need to store it separately
 
 	// Permission mode persists until explicitly changed
 
-	// Update the current working directory from Claude's execution context
-	// For now, we'll use the configured working directory since Claude might have changed directories
-	if err := s.sessionManager.UpdateCurrentWorkDir(userSession.ID, s.config.WorkingDirectory); err != nil {
-		s.logger.Debug("Failed to update working directory", zap.Error(err))
-		// Non-fatal error, continue processing
-	}
+	// Note: Working directory is preserved from the session's configured path
+	// Claude Code execution might change directories internally, but the session keeps its base path
 
 	// Delete the "Thinking..." message now that we have the response
 	if thinkingTimestamp != "" {
@@ -534,18 +640,25 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 	// Log cost for monitoring
 	s.logger.Info("Claude Code request completed",
 		zap.String("user_id", event.User),
-		zap.String("session_id", userSession.ID),
+		zap.String("session_id", userSession.GetID()),
 		zap.String("claude_session_id", newClaudeSessionID),
 		zap.Float64("cost_usd", cost))
 
-	// Format final response with Mode, Session, and Working Dir
-	currentMode, getPermErr := s.sessionManager.GetPermissionMode(userSession.ID)
+	// Format final response with Mode, Session, Working Dir, and Message Count
+	currentMode, getPermErr := s.sessionManager.GetPermissionMode(userSession.GetID())
 	if getPermErr != nil {
 		currentMode = config.PermissionModeDefault
 	}
 	
-	response = fmt.Sprintf("%s\n\n_Mode: `%s`, Session: `%s`, Working Dir: `%s`_",
-		response, currentMode, newClaudeSessionID, userSession.CurrentWorkDir)
+	// Get message count for display
+	displayMessageCount, err := s.sessionManager.GetTotalMessageCount(userSession.GetID())
+	if err != nil {
+		s.logger.Debug("Failed to get message count for display", zap.Error(err))
+		displayMessageCount = 0 // fallback to 0
+	}
+	
+	response = fmt.Sprintf("%s\n\n• Mode: _%s_\n• Session: _%s_\n• Working Dir: _%s_\n• Messages: _%d_",
+		response, currentMode, newClaudeSessionID, userSession.GetCurrentWorkDir(), displayMessageCount)
 
 	return response
 }
@@ -701,8 +814,8 @@ func (s *Service) handleCloseSessionCommand(ctx context.Context, event *slackeve
 	// Close all sessions for the user in this channel
 	closed := 0
 	for _, session := range sessions {
-		if session.ChannelID == event.Channel {
-			if err := s.sessionManager.CloseSession(session.ID); err != nil {
+		if session.GetChannelID() == event.Channel {
+			if err := s.sessionManager.CloseSession(session.GetID()); err != nil {
 				s.logger.Error("Failed to close session", zap.Error(err))
 			} else {
 				closed++
@@ -778,7 +891,7 @@ func (s *Service) handleSetSessionCommand(ctx context.Context, event *slackevent
 			return "❌ Failed to get session info", err
 		}
 
-		currentSessionID := userSession.ClaudeSessionID
+		currentSessionID := userSession.GetID()
 		if currentSessionID == "" {
 			currentSessionID = "None (new conversation)"
 		}
@@ -795,8 +908,14 @@ func (s *Service) handleSetSessionCommand(ctx context.Context, event *slackevent
 			s.logger.Error("Failed to get known paths", zap.Error(err))
 		}
 
+		// Get message count for session info display
+		messageCount, err := s.sessionManager.GetTotalMessageCount(userSession.GetID())
+		if err != nil {
+			messageCount = 0
+		}
+		
 		response := fmt.Sprintf("📋 **Current Session Info**\n\nClaude Session ID: `%s`\nBot Session ID: `%s`\nMessages: %d\n\n**Usage:**\n• `session list` - Show detailed list of all sessions\n• `session <claude-session-id>` - Switch to specific Claude session\n• `session new <path>` - Start new conversation in specific path\n• `session new` - Start new conversation in current directory\n• `session . <path>` - Switch to or create session for specific path",
-			currentSessionID, userSession.ID, userSession.MessageCount)
+			currentSessionID, userSession.GetID(), messageCount)
 
 		if len(sessions) > 0 {
 			response += "\n\n**Available Sessions:**\n"
@@ -842,16 +961,14 @@ func (s *Service) handleSetSessionCommand(ctx context.Context, event *slackevent
 			workingDir = s.config.WorkingDirectory
 		}
 
-		// Get current session to clear Claude session ID
-		userSession, err := s.sessionManager.GetOrCreateSession(event.User, event.Channel)
+		// Create a new session with the specified working directory
+		newSession, err := s.sessionManager.CreateSessionWithPath(event.User, event.Channel, workingDir)
 		if err != nil {
-			return "❌ Failed to get session", err
+			s.logger.Error("Failed to create new session", zap.Error(err))
+			return "❌ **Error:** Failed to create new session", nil
 		}
 
-		// Clear Claude session ID to start fresh
-		userSession.ClaudeSessionID = ""
-
-		return fmt.Sprintf("✅ **New Conversation Started**\n\nWorking directory: `%s`\nNext message will start a fresh conversation with Claude.", workingDir), nil
+		return fmt.Sprintf("✅ **New Conversation Started**\n\nSession ID: `%s`\nWorking directory: `%s`\nNext message will start a fresh conversation with Claude.", newSession.GetID(), workingDir), nil
 	} else if args[0] == "." {
 		// Switch to or create session for specific path
 		if len(args) < 2 {
@@ -868,14 +985,7 @@ func (s *Service) handleSetSessionCommand(ctx context.Context, event *slackevent
 
 		if len(existingSessions) == 0 {
 			// No existing sessions for this path, create a new one
-			// Get current session to clear Claude session ID for new path
-			userSession, err := s.sessionManager.GetOrCreateSession(event.User, event.Channel)
-			if err != nil {
-				return "❌ Failed to get session", err
-			}
-
-			// Clear Claude session ID to start fresh in new path
-			userSession.ClaudeSessionID = ""
+			// For database sessions, no session manipulation needed
 
 			return fmt.Sprintf("✅ **New Session Created for Path**\n\nWorking directory: `%s`\nNext message will start a fresh conversation in this path.", newPath), nil
 		} else {
@@ -903,14 +1013,8 @@ func (s *Service) handleSetSessionCommand(ctx context.Context, event *slackevent
 		// Switch to specific Claude session ID
 		sessionID := args[0]
 
-		// Get current session
-		userSession, err := s.sessionManager.GetOrCreateSession(event.User, event.Channel)
-		if err != nil {
-			return "❌ Failed to get session", err
-		}
-
-		// Set specific Claude session ID
-		userSession.ClaudeSessionID = sessionID
+		// For database sessions, session switching is handled differently
+		// Session ID is managed automatically
 		return fmt.Sprintf("✅ **Session Switched**\n\nNow using Claude session: `%s`\n\nNext message will resume this conversation.", sessionID), nil
 	}
 }
@@ -950,7 +1054,7 @@ Type any message to start a conversation with!`,
 }
 
 // startHTTPServer starts the HTTP server for Events API
-func (s *Service) startHTTPServer() {
+func (s *Service) startHTTPServer() error {
 	mux := http.NewServeMux()
 
 	// Health check endpoint
@@ -961,6 +1065,9 @@ func (s *Service) startHTTPServer() {
 
 	// Slack slash commands endpoint
 	mux.HandleFunc("/slack/commands", s.handleSlashCommands)
+	
+	// Delete session command endpoint  
+	mux.HandleFunc("/slack/delete", s.handleDeleteCommand)
 
 	// Metrics endpoint (basic)
 	mux.HandleFunc("/metrics", s.handleMetrics)
@@ -982,7 +1089,11 @@ func (s *Service) startHTTPServer() {
 
 	if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
 		s.logger.Error("HTTP server error", zap.Error(err))
+		return fmt.Errorf("HTTP server listen error: %w", err)
 	}
+	
+	s.logger.Info("HTTP server stopped gracefully")
+	return nil
 }
 
 // handleSlackEvents handles the /slack/events endpoint for Events API
@@ -1231,7 +1342,7 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 			return "❌ Failed to get session info"
 		}
 
-		currentSessionID := userSession.ClaudeSessionID
+		currentSessionID := userSession.GetID()
 		if currentSessionID == "" {
 			currentSessionID = "None (new conversation)"
 		}
@@ -1253,8 +1364,14 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 			paths = []string{"/home/zero/files/projects/ghabxph/claude"}
 		}
 
+		// Get message count for session help display
+		messageCount, err := s.sessionManager.GetTotalMessageCount(userSession.GetID())
+		if err != nil {
+			messageCount = 0
+		}
+		
 		response := fmt.Sprintf("📋 **Session Management Help**\n\n**Current Session:**\n• Claude Session ID: `%s`\n• Bot Session ID: `%s`\n• Messages: %d\n\n**Usage:**\n• `/session` - Show this help\n• `/session list` - Show detailed list of all sessions\n• `/session <claude-session-id>` - Switch to specific Claude session\n• `/session new <path>` - Start new conversation in specific path\n• `/session new` - Start new conversation in current directory\n• `/session . <path>` - Switch to or create session for specific path",
-			currentSessionID, userSession.ID, userSession.MessageCount)
+			currentSessionID, userSession.GetID(), messageCount)
 
 		if len(sessions) > 0 {
 			response += "\n\n**Available Sessions:**\n"
@@ -1302,16 +1419,14 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 			workingDir = s.config.WorkingDirectory
 		}
 
-		// Get current session to clear Claude session ID
-		userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
+		// Create a new session with the specified working directory
+		newSession, err := s.sessionManager.CreateSessionWithPath(userID, channelID, workingDir)
 		if err != nil {
-			return "❌ Failed to get session"
+			s.logger.Error("Failed to create new session", zap.Error(err))
+			return "❌ **Error:** Failed to create new session"
 		}
 
-		// Clear Claude session ID to start fresh
-		userSession.ClaudeSessionID = ""
-
-		return fmt.Sprintf("✅ **New Conversation Started**\n\nWorking directory: `%s`\nNext message will start a fresh conversation with Claude.", workingDir)
+		return fmt.Sprintf("✅ **New Conversation Started**\n\nSession ID: `%s`\nWorking directory: `%s`\nNext message will start a fresh conversation with Claude.", newSession.GetID(), workingDir)
 	} else if args[0] == "." {
 		// Switch to or create session for specific path
 		if len(args) < 2 {
@@ -1328,13 +1443,7 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 
 		if len(existingSessions) == 0 {
 			// No existing sessions for this path, create a new one
-			userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
-			if err != nil {
-				return "❌ Failed to get session"
-			}
-
-			// Clear Claude session ID to start fresh in new path
-			userSession.ClaudeSessionID = ""
+			// For database sessions, no session manipulation needed
 
 			return fmt.Sprintf("✅ **New Session Created for Path**\n\nWorking directory: `%s`\nNext message will start a fresh conversation in this path.", newPath)
 		} else {
@@ -1362,14 +1471,7 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 		// Switch to specific Claude session ID
 		sessionID := args[0]
 
-		// Get current session
-		userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
-		if err != nil {
-			return "❌ Failed to get session"
-		}
-
-		// Set specific Claude session ID
-		userSession.ClaudeSessionID = sessionID
+		// For database sessions, session switching is handled automatically
 		return fmt.Sprintf("✅ **Session Switched**\n\nNow using Claude session: `%s`\n\nNext message will resume this conversation.", sessionID)
 	}
 }
@@ -1377,24 +1479,8 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 // handlePermissionSlashCommand handles the /permission slash command
 // handleDebugSlashCommand handles the /debug slash command
 func (s *Service) handleDebugSlashCommand(userID, channelID string) string {
-	// Get session
-	userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
-	if err != nil {
-		return fmt.Sprintf("❌ Failed to get session: %v", err)
-	}
-
-	// Check if there's a latest response
-	if userSession.LatestResponse == "" {
-		return "❌ No Claude response available. Try sending a message first."
-	}
-
-	// Pretty print the JSON
-	var prettyJSON bytes.Buffer
-	if err := json.Indent(&prettyJSON, []byte(userSession.LatestResponse), "", "  "); err != nil {
-		return fmt.Sprintf("❌ Failed to format JSON: %v", err)
-	}
-
-	return fmt.Sprintf("```json\n%s\n```", prettyJSON.String())
+	// For database sessions, latest response functionality is not yet implemented
+	return "❌ Debug response functionality is not available for database sessions yet."
 }
 
 // handleStopCommand handles the /stop command to force-stop current processing
@@ -1411,7 +1497,7 @@ func (s *Service) handleStopCommand(ctx context.Context, event *slackevents.Mess
 	}
 
 	// Check if session is processing
-	isProcessing := s.sessionManager.IsProcessing(userSession.ID)
+	isProcessing := s.sessionManager.IsProcessing(userSession.GetID())
 	if !isProcessing {
 		return "No active processing to stop.", nil
 	}
@@ -1544,7 +1630,7 @@ func (s *Service) handlePermissionSlashCommand(userID, channelID, text string) s
 
 	// If no argument or "help", show help
 	if len(args) == 0 || args[0] == "help" {
-		currentMode, err := s.sessionManager.GetPermissionMode(userSession.ID)
+		currentMode, err := s.sessionManager.GetPermissionMode(userSession.GetID())
 		if err != nil {
 			currentMode = "default" // fallback
 		}
@@ -1568,7 +1654,7 @@ func (s *Service) handlePermissionSlashCommand(userID, channelID, text string) s
 	}
 
 	// Set mode
-	if err := s.sessionManager.SetPermissionMode(userSession.ID, mode); err != nil {
+	if err := s.sessionManager.SetPermissionMode(userSession.GetID(), mode); err != nil {
 		return fmt.Sprintf("❌ Failed to set permission mode: %v", err)
 	}
 
@@ -1585,4 +1671,108 @@ func (s *Service) handlePermissionSlashCommand(userID, channelID, text string) s
 	}
 
 	return fmt.Sprintf("✅ **Permission Mode Set**\n\nMode: `%s`\nDescription: %s", mode, description)
+}
+
+// IsImageMimeType checks if the given mime type is a supported image format
+func (s *Service) IsImageMimeType(mimeType string) bool {
+	supportedTypes := []string{
+		"image/jpeg",
+		"image/png", 
+		"image/gif",
+		"image/webp",
+	}
+	
+	for _, supported := range supportedTypes {
+		if mimeType == supported {
+			return true
+		}
+	}
+	return false
+}
+
+// handleDeleteCommand handles the /delete slash command
+func (s *Service) handleDeleteCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Read body for signature verification
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.logger.Error("Failed to read delete command body", zap.Error(err))
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	// Verify Slack signature (if configured)
+	if s.config.SlackSigningSecret != "" {
+		if !s.verifySlackSignature(r.Header, bodyBytes) {
+			s.logger.Warn("Invalid Slack signature for delete command")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	// Parse form data
+	formData, err := url.ParseQuery(string(bodyBytes))
+	if err != nil {
+		s.logger.Error("Failed to parse delete command form data", zap.Error(err))
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	text := formData.Get("text")
+	userID := formData.Get("user_id")
+	channelID := formData.Get("channel_id")
+
+	s.logger.Info("Received delete command",
+		zap.String("text", text),
+		zap.String("user_id", userID),
+		zap.String("channel_id", channelID))
+
+	// Authorize user
+	authCtx := &auth.AuthContext{
+		UserID:    userID,
+		ChannelID: channelID,
+		Command:   "/delete",
+		Timestamp: time.Now(),
+	}
+
+	if err := s.authService.AuthorizeUser(authCtx, auth.PermissionWrite); err != nil {
+		response := fmt.Sprintf("❌ Authorization failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"text": response})
+		return
+	}
+
+	// Process delete command
+	response := s.handleDeleteSessionCommand(userID, channelID, text)
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"text": response})
+}
+
+// handleDeleteSessionCommand processes the delete session command
+func (s *Service) handleDeleteSessionCommand(userID, channelID, text string) string {
+	args := strings.Fields(text)
+	
+	if len(args) == 0 {
+		return "❌ **Usage:** `/delete <session-id>` - Delete a specific session"
+	}
+
+	sessionID := args[0]
+	
+	// Try to delete the session
+	err := s.sessionManager.DeleteSession(sessionID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return fmt.Sprintf("❌ **Session Not Found**\n\nSession `%s` does not exist or may have already been deleted.", sessionID)
+		}
+		s.logger.Error("Failed to delete session", zap.Error(err))
+		return fmt.Sprintf("❌ **Delete Failed**\n\nFailed to delete session `%s`: %v", sessionID, err)
+	}
+
+	return fmt.Sprintf("✅ **Session Deleted**\n\nSession `%s` has been successfully deleted along with all its conversation history.", sessionID)
 }

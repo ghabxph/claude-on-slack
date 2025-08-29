@@ -114,6 +114,10 @@ func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, se
 	// Add permission mode
 	args = append(args, "--permission-mode", string(permissionMode))
 	
+	// Add image storage directory for file access
+	imageStorageDir := "/tmp/claude-slack-images"
+	args = append(args, "--add-dir", imageStorageDir)
+	
 	// Add system prompt for Slack bot context
 	systemPrompt := "You are Claude Code running in a Slack bot environment. Be helpful, concise, and format responses appropriately for Slack."
 	args = append(args, "--append-system-prompt", systemPrompt)
@@ -326,16 +330,18 @@ Available commands are filtered for security.`
 }
 
 // ProcessClaudeCodeRequest processes a request using Claude Code CLI
-func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage string, sessionID string, userID string, allowedTools []string, isNewSession bool, permissionMode config.PermissionMode) (string, string, float64, string, error) {
-	// Use configured working directory instead of isolated workspace for full system access
-	workingDir := e.config.WorkingDirectory
+func (e *Executor) ProcessClaudeCodeRequest(ctx context.Context, userMessage string, sessionID string, userID string, workingDir string, allowedTools []string, isNewSession bool, permissionMode config.PermissionMode) (string, string, float64, string, error) {
+	// Use provided working directory, fallback to config if empty
 	if workingDir == "" {
-		// Default to user's home directory for full access
-		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			workingDir = homeDir
-		} else {
-			workingDir = "." // Fallback to current directory
+		workingDir = e.config.WorkingDirectory
+		if workingDir == "" {
+			// Default to user's home directory for full access
+			homeDir, err := os.UserHomeDir()
+			if err == nil {
+				workingDir = homeDir
+			} else {
+				workingDir = "." // Fallback to current directory
+			}
 		}
 	}
 	

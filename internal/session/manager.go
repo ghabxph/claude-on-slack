@@ -207,6 +207,39 @@ func (m *Manager) GetOrCreateSession(userID, channelID string) (*Session, error)
 	return m.CreateSession(userID, channelID)
 }
 
+// CreateSessionWithPath creates a new session with a specific working directory
+func (m *Manager) CreateSessionWithPath(userID, channelID, workingDir string) (SessionInfo, error) {
+	session := &Session{
+		ID:             uuid.New().String(),
+		UserID:         userID,
+		ChannelID:      channelID,
+		WorkspaceDir:   workingDir,
+		CurrentWorkDir: workingDir,
+		CreatedAt:      time.Now(),
+		LastActivity:   time.Now(),
+		Active:         true,
+		PermissionMode: config.PermissionModeDefault,
+		ClaudeSessionID: "", // Will be set when first message is sent
+		History:        []claude.Message{},
+		MessageCount:   0,
+		MessageQueue:   &MessageQueue{Messages: []string{}, IsProcessing: false},
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.sessions[session.ID] = session
+	m.userSessions[userID] = append(m.userSessions[userID], session)
+
+	m.logger.Info("Created new memory session with custom path",
+		zap.String("session_id", session.ID),
+		zap.String("user_id", userID),
+		zap.String("channel_id", channelID),
+		zap.String("working_dir", workingDir))
+
+	return session, nil
+}
+
 // UpdateSessionActivity updates the last activity time for a session
 func (m *Manager) UpdateSessionActivity(sessionID string) error {
 	m.mu.Lock()
@@ -635,4 +668,47 @@ func (m *Manager) GetSessionsByPath(path string, limit int) ([]SessionInfo, erro
 	}
 
 	return sessions, nil
+}
+
+// GetTotalMessageCount returns the total message count for a session (memory-based implementation)
+func (m *Manager) GetTotalMessageCount(sessionID string) (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return 0, fmt.Errorf("session %s not found", sessionID)
+	}
+	
+	return session.MessageCount, nil
+}
+
+// DeleteSession deletes a session from memory
+func (m *Manager) DeleteSession(sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+
+	// Remove from sessions map
+	delete(m.sessions, sessionID)
+
+	// Remove from user sessions
+	if userSessions, exists := m.userSessions[session.UserID]; exists {
+		for i, s := range userSessions {
+			if s.ID == sessionID {
+				m.userSessions[session.UserID] = append(userSessions[:i], userSessions[i+1:]...)
+				break
+			}
+		}
+	}
+
+	m.logger.Info("Deleted memory session",
+		zap.String("session_id", sessionID),
+		zap.String("user_id", session.UserID))
+
+	return nil
 }

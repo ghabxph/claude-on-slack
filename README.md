@@ -433,4 +433,4 @@ Check `CLAUDE.md` for more planned features!
 
 ---
 
-Built with ❤️ for development teams who want natural AI assistance in their Slack workflow.
+Built with ❤️ for DIY enthusiasts who dream of having their own personal AI assistant - Jarvis in chat mode! 🤖🏠

@@ -83,9 +83,30 @@ Looking toward more self-hosted friendly options:
 
 **Setup**: Use SSH port forwarding to expose Slack endpoints from your home network through the bastion server.
 
+### 🔒 **IMPORTANT: Create Your Own Private Slack Workspace**
+
+**⚠️ Security & Privacy Warning:**
+**Create your own private Slack workspace** - don't use your work or shared Slack!
+
+**Why this matters:**
+- **Slack is FREE** for personal use - take advantage of it! 
+- **You'll be the only user** in your personal workspace
+- **Privacy**: Your home automation commands stay private
+- **Security**: You don't want coworkers accidentally turning off your lights! 💡
+- **Control**: Full admin control over your personal AI assistant
+
+**Setup Steps:**
+1. Go to slack.com and create a **new workspace** 
+2. Make it **private** and **personal** to you
+3. Install your Claude-on-Slack bot there
+4. Enjoy complete control over your digital home
+
+**Remember**: This is YOUR personal Jarvis - keep it personal! 🏠🔒
+
 ### 🎯 **Total Real Cost**
 - **Claude Max**: $100/month
 - **Bastion Server**: $5/month  
+- **Private Slack Workspace**: **FREE** 🆓
 - **Total**: ~$105/month for full "Jarvis" experience
 
 Worth it? For me, absolutely. Your mileage may vary! 💸

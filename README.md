@@ -50,7 +50,7 @@ This is your "Jarvis in chat mode" - working **right now** on real projects! ðŸš
 
 Upload any image and get instant AI analysis - perfect for debugging, technical analysis, or understanding complex diagrams:
 
-<img width="1141" alt="Claude analyzing a TradingView gold chart" src="https://github.com/user-attachments/assets/YOUR_IMAGE_URL_HERE">
+<img width="1251" height="1167" alt="image" src="https://github.com/user-attachments/assets/1b2a3c84-4a1a-4a11-8667-d748b21b8001" />
 
 *Real example: Upload a TradingView screenshot and Claude provides comprehensive technical analysis including price movements, trend analysis, and trading insights - all through natural conversation!*
 

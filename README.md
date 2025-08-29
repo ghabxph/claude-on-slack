@@ -52,8 +52,26 @@ Looking toward more self-hosted friendly options:
 - **Cost Reduction**: Working toward cheaper, self-hosted alternatives
 - **Current Reality**: Claude Code CLI remains the main core due to reliability
 
-### 🎯 **Bottom Line**
-Right now, if you want the full experience, you'll need Claude Max subscription. But the foundation is here - and the future might bring cheaper alternatives!
+### 🌐 **Network Requirements: Exposing Your Home Setup**
+**Reality Check**: Your home is behind NAT, so Slack can't reach your endpoints directly.
+
+**Solution Options**:
+1. **Static IP**: If you have a machine with public static IP (lucky you!)
+2. **Bastion Server**: Buy a cheap VPS for SSH tunneling (**Recommended**)
+
+**💰 Bastion Server Cost**: ~$5/month from:
+- **Digital Ocean**: Basic droplet
+- **Linode**: Nanode plan  
+- **Contabo**: VPS S plan
+
+**Setup**: Use SSH port forwarding to expose Slack endpoints from your home network through the bastion server.
+
+### 🎯 **Total Real Cost**
+- **Claude Max**: $100/month
+- **Bastion Server**: $5/month  
+- **Total**: ~$105/month for full "Jarvis" experience
+
+Worth it? For me, absolutely. Your mileage may vary! 💸
 
 ## 🚀 Quick Start
 

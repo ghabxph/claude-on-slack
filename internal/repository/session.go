@@ -172,6 +172,7 @@ func (r *SessionRepository) UpdateSessionUserPrompt(sessionID string, prompt str
 	return nil
 }
 
+
 // UpdateChildUserPrompt updates the user prompt for a child session
 func (r *SessionRepository) UpdateChildUserPrompt(childID int, prompt string) error {
 	query := `UPDATE child_sessions SET user_prompt = $1, updated_at = NOW() WHERE id = $2`

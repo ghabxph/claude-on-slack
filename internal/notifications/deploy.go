@@ -40,12 +40,11 @@ func (n *DeploymentNotifier) FormatDeploymentMessage(version string, changes []s
 			message += fmt.Sprintf("• %s\n", change)
 		}
 	} else {
-		message += "• 🔧 **Enhanced Reliability** - Application-level auto-restart with failure recovery\n"
-		message += "• 🐛 **System Compatibility** - Fixed systemd environment compatibility issues\n"
-		message += "• 🗄️ **Database Connection** - Resolved PostgreSQL networking and authentication\n"
-		message += "• 🔄 **Better Error Handling** - Improved startup validation and error reporting\n"
-		message += "• 🛡️ **Connection Resilience** - Added retry logic with exponential backoff\n"
-		message += "• ⚡ **HTTP Server** - Enhanced server startup and error propagation\n"
+		message += "• 🔗 **Session Continuity Fix** - Resolved conversation resume failures\n"
+		message += "• 🎯 **Proper Session Management** - Fixed child session creation logic\n"
+		message += "• 🔧 **Session Logic Fixed** - Properly detects first messages vs resume based on child sessions\n"
+		message += "• ✅ **New Session Support** - /session new followed by messages now works correctly\n"
+		message += "• 🎯 **Correct CLI Usage** - Uses --session-id for first messages, --resume for continuations\n"
 	}
 	
 	message += "\n📋 *Full details*: See <https://github.com/ghabxph/claude-on-slack/blob/main/CHANGELOG.md|CHANGELOG.md>\n"

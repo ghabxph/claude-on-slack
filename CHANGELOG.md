@@ -2,6 +2,53 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.2.12] - 2025-08-30
+
+### Fixed - Session Continuity Issues
+- **Critical Fix**: Resolved "No conversation found with session ID" errors that prevented successful message processing
+- **Session Logic**: Fixed session determination to check child sessions instead of message count for proper new/resume detection
+- **New Session Support**: `/session new` followed by messages now works correctly using `--session-id` for first message
+- **Resume Logic**: Subsequent messages properly use `--resume` with Claude's returned session IDs from child sessions
+- **Debug Enhancement**: Added comprehensive debug information to error messages including session IDs, commands, and execution context
+
+### Technical - Session Management Improvements
+- **Child Session Detection**: Modified logic to check for existence of child sessions (actual Claude conversations) rather than total message count
+- **Command Selection**: Proper use of `--session-id` for new conversations and `--resume` for continuing conversations
+- **Error Diagnostics**: Enhanced error messages with complete debug information including full Claude Code CLI commands
+- **Session Flow**: Corrected flow where parent sessions (bot UUIDs) are used for new conversations, child sessions (Claude UUIDs) for resuming
+- **Database Integration**: Improved parent-child session relationship tracking and retrieval
+
+### User Impact
+- **Before**: New sessions immediately failed with "No conversation found with session ID" error
+- **After**: Seamless conversation flow with proper session creation and continuation
+- **Debugging**: Error messages now include full execution context for faster troubleshooting
+
+## [2.2.4] - 2025-08-30
+
+### Enhanced - Error Reporting & Diagnostics
+- **Smart Error Categorization**: Automatic classification of Claude Code execution errors into specific types (permission, network, syntax, file, timeout)
+- **Contextual Troubleshooting**: Actionable suggestions and solutions provided for each error category
+- **Detailed Stderr Output**: Full capture and preservation of stderr output from Claude Code CLI execution
+- **Enhanced Error Messages**: Rich, formatted error messages with markdown styling and emoji indicators
+- **Faster Debugging**: Eliminated guesswork by providing comprehensive error context and specific failure details
+
+### Technical - Error Handling Improvements
+- **createEnhancedError()**: New method for generating detailed error messages with category-specific troubleshooting
+- **categorizeError()**: Intelligent error analysis to classify failures based on stderr and error patterns
+- **Stderr Preservation**: Modified executor to capture and include stderr output in all error responses
+- **Pattern Matching**: Advanced text analysis to identify common error patterns and provide targeted help
+- **Duration Tracking**: Include execution time in error messages for performance troubleshooting
+
+### Fixed - User Experience
+- **Generic Error Messages**: Replaced "claude code execution failed: exit status 1" with detailed diagnostic information
+- **Missing Context**: Stderr output no longer lost; now displayed with proper formatting in Slack messages
+- **Troubleshooting Gaps**: Added specific guidance for permission issues, missing commands, network problems, etc.
+- **Error Classification**: Unknown failures now properly categorized with relevant troubleshooting steps
+
+### User Impact
+- **Before**: `❌ Claude Code processing failed: failed to execute Claude Code: claude code execution failed: exit status 1`
+- **After**: `🔒 **Permission Denied** - The system denied access to required resources. [Full stderr output + specific troubleshooting steps]`
+
 ## [2.2.3] - 2025-08-29
 
 ### Enhanced - System Reliability & Compatibility

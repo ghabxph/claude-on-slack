@@ -712,3 +712,22 @@ func (m *Manager) DeleteSession(sessionID string) error {
 
 	return nil
 }
+
+// GetLatestChildSessionID returns the latest child session ID for resume operations (memory implementation)
+func (m *Manager) GetLatestChildSessionID(sessionID string) (*string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return nil, fmt.Errorf("session %s not found", sessionID)
+	}
+
+	// For memory sessions, use the Claude session ID if set
+	if session.ClaudeSessionID != "" {
+		return &session.ClaudeSessionID, nil
+	}
+
+	// No child session ID available
+	return nil, nil
+}

@@ -134,10 +134,16 @@ func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, se
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	
+	// Log the complete command for debugging
+	fullCommand := fmt.Sprintf("echo '%s' | %s %s", userMessage, e.claudeCodePath, strings.Join(args, " "))
+	
 	e.logger.Info("Executing Claude Code CLI",
 		zap.String("session_id", sessionID),
 		zap.String("working_dir", workingDir),
-		zap.Strings("allowed_tools", allowedTools))
+		zap.Strings("allowed_tools", allowedTools),
+		zap.Strings("args", args),
+		zap.Bool("is_new_session", isNewSession),
+		zap.String("full_command", fullCommand))
 	
 	// Execute command
 	start := time.Now()
@@ -145,11 +151,22 @@ func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, se
 	duration := time.Since(start)
 	
 	if err != nil {
+		stderrOutput := strings.TrimSpace(stderr.String())
 		e.logger.Error("Claude Code CLI execution failed",
 			zap.Error(err),
-			zap.String("stderr", stderr.String()),
+			zap.String("stderr", stderrOutput),
 			zap.Duration("duration", duration))
-		return nil, fmt.Errorf("claude code execution failed: %w", err)
+		
+		// Create enhanced error message with stderr details and debug info
+		debugInfo := map[string]interface{}{
+			"session_id":     sessionID,
+			"is_new_session": isNewSession,
+			"working_dir":    workingDir,
+			"args":          args,
+			"full_command":  fullCommand,
+		}
+		enhancedErr := e.createEnhancedError(err, stderrOutput, duration, debugInfo)
+		return nil, enhancedErr
 	}
 	
 	// Parse JSON response
@@ -180,6 +197,111 @@ func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, se
 		zap.Duration("duration", duration))
 	
 	return &response, nil
+}
+
+// createEnhancedError creates a detailed error message with context and troubleshooting information
+func (e *Executor) createEnhancedError(originalErr error, stderrOutput string, duration time.Duration, debugInfo map[string]interface{}) error {
+	// Parse the original error for specific patterns
+	errorType := e.categorizeError(originalErr, stderrOutput)
+	
+	// Create base error message
+	baseMsg := fmt.Sprintf("Claude Code execution failed after %v", duration.Truncate(time.Millisecond))
+	
+	// Format debug information
+	debugMsg := fmt.Sprintf("**Debug Information:**\n• Session ID: `%v`\n• New Session: `%v`\n• Working Dir: `%v`\n• Command: `%v`",
+		debugInfo["session_id"], debugInfo["is_new_session"], debugInfo["working_dir"], debugInfo["full_command"])
+	
+	// Add specific error details based on type
+	switch errorType {
+	case "permission_denied":
+		return fmt.Errorf("%s\n\n🔒 **Permission Denied**\nThe system denied access to required resources.\n\n**Stderr Output:**\n```\n%s\n```\n\n**Troubleshooting:**\n• Check file/directory permissions\n• Verify you have access to the working directory\n• Try running with appropriate privileges", baseMsg, stderrOutput)
+	
+	case "command_not_found":
+		return fmt.Errorf("%s\n\n❌ **Command Not Found**\nA required command or binary was not found.\n\n**Stderr Output:**\n```\n%s\n```\n\n**Troubleshooting:**\n• Check if the required tool is installed\n• Verify PATH environment variable\n• Install missing dependencies", baseMsg, stderrOutput)
+	
+	case "syntax_error":
+		return fmt.Errorf("%s\n\n⚠️ **Syntax Error**\nCode or command syntax is invalid.\n\n**Stderr Output:**\n```\n%s\n```\n\n**Troubleshooting:**\n• Review the code syntax\n• Check for typos in commands\n• Validate file formats", baseMsg, stderrOutput)
+	
+	case "network_error":
+		return fmt.Errorf("%s\n\n🌐 **Network Error**\nNetwork connectivity or timeout issue.\n\n**Stderr Output:**\n```\n%s\n```\n\n**Troubleshooting:**\n• Check internet connection\n• Verify network settings\n• Try again after a moment", baseMsg, stderrOutput)
+	
+	case "file_not_found":
+		return fmt.Errorf("%s\n\n📁 **File Not Found**\nRequired file or directory does not exist.\n\n**Stderr Output:**\n```\n%s\n```\n\n**Troubleshooting:**\n• Check file paths are correct\n• Verify files exist in expected locations\n• Check working directory", baseMsg, stderrOutput)
+	
+	case "timeout":
+		return fmt.Errorf("%s\n\n⏱️ **Operation Timeout**\nThe operation took too long to complete.\n\n**Stderr Output:**\n```\n%s\n```\n\n**Troubleshooting:**\n• Operation may require more time\n• Check system resources\n• Try breaking down into smaller tasks", baseMsg, stderrOutput)
+	
+	default:
+		// Generic error with full stderr output and debug info
+		if stderrOutput != "" {
+			return fmt.Errorf("%s\n\n🚨 **Execution Error**\nOriginal error: %v\n\n**Stderr Output:**\n```\n%s\n```\n\n%s\n\n**Troubleshooting:**\n• Review the error details above\n• Check system logs for more information\n• Verify all requirements are met", baseMsg, originalErr, stderrOutput, debugMsg)
+		} else {
+			return fmt.Errorf("%s\n\n🚨 **Execution Error**\nOriginal error: %v\n\n%s\n\n**Troubleshooting:**\n• Check system logs for more information\n• Try running the command manually\n• Verify Claude Code CLI is properly installed", baseMsg, originalErr, debugMsg)
+		}
+	}
+}
+
+// categorizeError analyzes the error and stderr to determine the error type
+func (e *Executor) categorizeError(originalErr error, stderrOutput string) string {
+	// Convert to lowercase for easier matching
+	errorStr := strings.ToLower(originalErr.Error())
+	stderrLower := strings.ToLower(stderrOutput)
+	
+	// Combined text for analysis
+	combinedText := errorStr + " " + stderrLower
+	
+	// Check for permission errors
+	if strings.Contains(combinedText, "permission denied") ||
+		strings.Contains(combinedText, "access denied") ||
+		strings.Contains(combinedText, "operation not permitted") ||
+		strings.Contains(combinedText, "insufficient privileges") {
+		return "permission_denied"
+	}
+	
+	// Check for command not found errors
+	if strings.Contains(combinedText, "command not found") ||
+		strings.Contains(combinedText, "no such file or directory") && strings.Contains(combinedText, "/bin/") ||
+		strings.Contains(combinedText, "executable file not found") ||
+		strings.Contains(combinedText, "not found in path") {
+		return "command_not_found"
+	}
+	
+	// Check for syntax errors
+	if strings.Contains(combinedText, "syntax error") ||
+		strings.Contains(combinedText, "invalid syntax") ||
+		strings.Contains(combinedText, "parse error") ||
+		strings.Contains(combinedText, "unexpected token") ||
+		strings.Contains(combinedText, "invalid character") {
+		return "syntax_error"
+	}
+	
+	// Check for network errors
+	if strings.Contains(combinedText, "network") ||
+		strings.Contains(combinedText, "connection refused") ||
+		strings.Contains(combinedText, "timeout") ||
+		strings.Contains(combinedText, "dns") ||
+		strings.Contains(combinedText, "unreachable") ||
+		strings.Contains(combinedText, "connection timed out") {
+		return "network_error"
+	}
+	
+	// Check for file not found errors
+	if strings.Contains(combinedText, "no such file") ||
+		strings.Contains(combinedText, "file not found") ||
+		strings.Contains(combinedText, "directory not found") ||
+		strings.Contains(combinedText, "cannot find") && (strings.Contains(combinedText, "file") || strings.Contains(combinedText, "directory")) {
+		return "file_not_found"
+	}
+	
+	// Check for timeout errors
+	if strings.Contains(combinedText, "timeout") ||
+		strings.Contains(combinedText, "deadline exceeded") ||
+		strings.Contains(combinedText, "context deadline exceeded") ||
+		strings.Contains(combinedText, "operation timed out") {
+		return "timeout"
+	}
+	
+	return "generic"
 }
 
 // ExecuteCommand executes a system command with safety checks

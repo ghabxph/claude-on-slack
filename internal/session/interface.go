@@ -20,6 +20,7 @@ type SessionManager interface {
 	UpdateSessionActivity(sessionID string) error
 	AddMessageToSession(sessionID string, message claude.Message) error
 	CheckRateLimit(sessionID string) (bool, time.Duration, error)
+	GetLatestChildSessionID(sessionID string) (*string, error)
 
 	// Permission and state management
 	SetPermissionMode(sessionID string, mode config.PermissionMode) error

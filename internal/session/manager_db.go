@@ -547,6 +547,73 @@ func (m *DatabaseManager) DeleteSession(sessionID string) error {
 	return m.repository.DeleteSession(sessionID)
 }
 
+// ProcessClaudeAIResponse creates new child session with Claude's returned session ID
+func (m *DatabaseManager) ProcessClaudeAIResponse(sessionID string, claudeSessionID string, aiResponse string) error {
+	session, err := m.getSessionBySessionID(sessionID)
+	if err != nil {
+		return err
+	}
+
+	// Find current leaf to link as previous
+	leafChild, err := m.repository.FindLeafChild(session.ID)
+	if err != nil {
+		return fmt.Errorf("failed to find leaf child: %w", err)
+	}
+
+	var previousSessionID *int
+	if leafChild != nil {
+		previousSessionID = &leafChild.ID
+	}
+
+	// Create new child session with Claude's session ID
+	childSession := &repository.ChildSession{
+		SessionID:         claudeSessionID, // Use Claude's returned session ID
+		PreviousSessionID: previousSessionID,
+		RootParentID:      session.ID,
+		AIResponse:        &aiResponse,
+		UserPrompt:        nil, // Will be set when user responds
+	}
+
+	if err := m.repository.CreateChildSession(childSession); err != nil {
+		return fmt.Errorf("failed to create child session: %w", err)
+	}
+
+	// Update conversation tree cache
+	m.mu.Lock()
+	if tree, exists := m.conversationTrees[session.ID]; exists {
+		m.conversationTrees[session.ID] = append(tree, childSession)
+	}
+	m.mu.Unlock()
+
+	m.logger.Debug("Created child session with Claude session ID",
+		zap.String("root_session_id", sessionID),
+		zap.String("claude_session_id", claudeSessionID),
+		zap.Int("root_parent_id", session.ID))
+
+	return nil
+}
+
+// GetLatestChildSessionID returns the latest child session ID for resume operations
+func (m *DatabaseManager) GetLatestChildSessionID(sessionID string) (*string, error) {
+	session, err := m.getSessionBySessionID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find the latest child session
+	leafChild, err := m.repository.FindLeafChild(session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find leaf child: %w", err)
+	}
+
+	if leafChild == nil {
+		// No child sessions exist yet
+		return nil, nil
+	}
+
+	return &leafChild.SessionID, nil
+}
+
 // Stop cleanup resources (no background routines in database mode)
 func (m *DatabaseManager) Stop() {
 	m.logger.Info("Database session manager stopped")

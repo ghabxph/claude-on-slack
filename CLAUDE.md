@@ -36,6 +36,12 @@
   - Slack-friendly markdown formatting
   - Deletion of "Thinking..." messages
   - Clean session and directory display
+- [x] **Enhanced Error Reporting** (v2.2.4):
+  - Smart categorization of Claude Code execution errors
+  - Detailed stderr output preservation and display
+  - Contextual troubleshooting suggestions for each error type
+  - Rich formatted error messages with markdown and emojis
+  - Faster debugging with comprehensive error context
 
 ### Infrastructure
 - [x] **Deployment**:

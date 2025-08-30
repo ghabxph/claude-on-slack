@@ -591,16 +591,40 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 	// For database sessions, we handle concurrency differently
 	// TODO: Implement database-level session locking if needed
 
-	// For database sessions, use session ID as Claude session ID
-	claudeSessionID := userSession.GetID()
+	// Determine Claude session ID based on conversation state
+	var claudeSessionID string
+	var isNewSession bool
 	
-	// Check if this is the first message in the session (to determine --session-id vs --resume)
-	messageCount, err := s.sessionManager.GetTotalMessageCount(userSession.GetID())
+	// Check if there are any child sessions (actual Claude conversations)
+	latestChildSessionID, err := s.sessionManager.GetLatestChildSessionID(userSession.GetID())
 	if err != nil {
-		s.logger.Debug("Failed to get message count, assuming new session", zap.Error(err))
-		messageCount = 0
+		s.logger.Error("Failed to get latest child session ID", zap.Error(err))
+		return fmt.Sprintf("❌ Failed to get session info: %v", err)
 	}
-	isNewSession := messageCount == 0 // First message uses --session-id, subsequent use --resume
+	
+	s.logger.Info("Session determination logic", 
+		zap.String("bot_session_id", userSession.GetID()),
+		zap.String("channel_id", event.Channel),
+		zap.String("user_id", event.User),
+		zap.Bool("has_child_sessions", latestChildSessionID != nil && *latestChildSessionID != ""))
+	
+	if latestChildSessionID == nil || *latestChildSessionID == "" {
+		// No child sessions = first actual Claude conversation
+		claudeSessionID = userSession.GetID()
+		isNewSession = true
+		s.logger.Info("FIRST MESSAGE - using --session-id", 
+			zap.String("bot_session_id", userSession.GetID()),
+			zap.String("claude_session_id", claudeSessionID),
+			zap.Bool("is_new_session", isNewSession))
+	} else {
+		// Child sessions exist = resume conversation
+		claudeSessionID = *latestChildSessionID
+		isNewSession = false
+		s.logger.Info("RESUME MESSAGE - using --resume with child session ID", 
+			zap.String("bot_session_id", userSession.GetID()),
+			zap.String("claude_session_id", claudeSessionID),
+			zap.Bool("is_new_session", isNewSession))
+	}
 
 	// Get permission mode
 	permMode, permErr := s.sessionManager.GetPermissionMode(userSession.GetID())
@@ -621,8 +645,22 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 		s.logger.Error("Failed to update latest response", zap.Error(err))
 	}
 
-	// For database sessions, Claude session ID is derived from session ID
-	// No need to store it separately
+	// Always store Claude's returned session ID as a child session for future resume operations
+	if newClaudeSessionID != "" {
+		if dbManager, ok := s.sessionManager.(*session.DatabaseManager); ok {
+			if err := dbManager.ProcessClaudeAIResponse(userSession.GetID(), newClaudeSessionID, response); err != nil {
+				s.logger.Error("Failed to store Claude AI response as child session", 
+					zap.String("bot_session_id", userSession.GetID()),
+					zap.String("claude_session_id", newClaudeSessionID),
+					zap.Error(err))
+			} else {
+				s.logger.Debug("Stored Claude AI response as child session", 
+					zap.String("bot_session_id", userSession.GetID()),
+					zap.String("claude_session_id", newClaudeSessionID),
+					zap.String("input_session_id", claudeSessionID))
+			}
+		}
+	}
 
 	// Permission mode persists until explicitly changed
 

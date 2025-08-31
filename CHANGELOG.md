@@ -2,6 +2,13 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.6.1] - 2025-08-31
+
+### Enhanced - System Prompt & Task Management
+- **Improved System Prompt**: Enhanced Claude Code system prompt with comprehensive workflow guidelines for better task planning, research, and execution
+- **Better Task Communication**: More verbose explanations since Claude's internal reasoning isn't visible in Slack
+- **Code Cleanup**: Removed unused `GetClaudeCodeSystemPrompt()` function
+
 ## [2.6.0] - 2025-08-31
 
 ### Added - Conversation Summarization Feature

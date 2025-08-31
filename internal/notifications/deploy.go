@@ -40,11 +40,11 @@ func (n *DeploymentNotifier) FormatDeploymentMessage(version string, changes []s
 			message += fmt.Sprintf("• %s\n", change)
 		}
 	} else {
-		message += "• 🚨 **Centralized Error Logging** - All errors now sent to both console and Slack channel\n"
-		message += "• 📍 **Channel Context Tracking** - Every error includes channel and user context\n"
-		message += "• 🔍 **Enhanced Debugging** - Detailed stack traces and error locations visible in Slack\n"
-		message += "• ⚡ **Real-time Error Reporting** - Instant error visibility for faster issue resolution\n"
-		message += "• 🔧 **Fixed Critical Bug** - Resolved hardcoded error messages in /session command\n"
+		message += "• 🛠️ **Database Query Robustness** - Replaced SELECT * with explicit columns for schema safety\n"
+		message += "• 🔧 **SQL Scan Error Fix** - Resolved critical column order mismatch in child session queries\n"
+		message += "• 🚀 **Migration-Proof Design** - Future database changes won't break existing queries\n"
+		message += "• 🎯 **Type Safety** - Eliminated runtime SQL scan errors from column/field misalignment\n"
+		message += "• ⚡ **Performance & Maintainability** - Explicit column selection improves query optimization\n"
 	}
 	
 	message += "\n📋 *Full details*: See <https://github.com/ghabxph/claude-on-slack/blob/main/CHANGELOG.md|CHANGELOG.md>\n"

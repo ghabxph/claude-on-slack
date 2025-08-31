@@ -2,6 +2,21 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.5.1] - 2025-08-31
+
+### Fixed - Database Query Robustness
+- **Schema-Safe Queries**: Replaced all `SELECT *` queries with explicit column names to prevent schema evolution issues
+- **Column Order Independence**: Fixed critical SQL scan error where database column order didn't match struct field order  
+- **Migration-Proof Architecture**: Future database migrations won't break existing queries due to column reordering
+- **Child Session Queries**: Fixed `GetConversationTree()` and `FindLeafChild()` functions that were failing due to `summary` column positioning
+- **Complete Query Overhaul**: Updated all repository functions (`GetSessionBySessionID`, `ListAllSessions`, `GetChannelState`, etc.) to use explicit column selection
+
+### Technical - Database Layer Improvements
+- **Explicit Column Selection**: All queries now specify exact columns needed, improving performance and maintainability
+- **Type Safety**: Eliminated runtime SQL scan errors caused by column/struct field misalignment
+- **Future-Proof Design**: Database schema can evolve safely without breaking application queries
+- **Debugging Enhancement**: Clear column-to-field mapping makes debugging database issues much easier
+
 ## [2.5.0] - 2025-08-31
 
 ### Added - Centralized Error Logging System

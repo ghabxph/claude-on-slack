@@ -1414,9 +1414,9 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 			s.logger.Error("Failed to get known paths", zap.Error(err))
 		}
 		
-		// Add default project path if no paths found
+		// Add default working directory if no paths found
 		if len(paths) == 0 {
-			paths = []string{"/home/zero/files/projects/ghabxph/claude"}
+			paths = []string{s.config.WorkingDirectory}
 		}
 
 		// Get message count for session help display

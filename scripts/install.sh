@@ -2,6 +2,14 @@
 
 # claude-on-slack Installation Script
 # Installs the claude-on-slack bot as a systemd service
+#
+# Environment Variables:
+#   CLAUDE_SERVICE_USER - User to run service as (default: current user)
+#   CLAUDE_PROJECT_DIR  - Directory to install project in (default: /home/user/claude-on-slack)
+#
+# Usage:
+#   ./install.sh
+#   CLAUDE_PROJECT_DIR=/opt/my-claude ./install.sh
 
 set -e
 
@@ -17,6 +25,7 @@ SERVICE_NAME="slack-claude-bot"
 # Default to current user if not specified
 SERVICE_USER="${CLAUDE_SERVICE_USER:-$(logname 2>/dev/null || whoami)}"
 INSTALL_DIR="/opt/claude-on-slack"
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-/home/$SERVICE_USER/claude-on-slack}"  # Configurable project directory
 CONFIG_DIR="/home/$SERVICE_USER/.config/claude-on-slack"  # User config directory
 LOG_DIR="/home/$SERVICE_USER/.local/share/claude-on-slack/logs"  # User log directory  
 WORK_DIR="/home/$SERVICE_USER"  # User's home directory
@@ -129,12 +138,12 @@ build_application() {
     print_status "Running: go mod tidy"
     go mod tidy
     
-    print_status "Running: go build -o /home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/$SERVICE_NAME ./cmd/slack-claude-bot"
-    go build -o "/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/$SERVICE_NAME" ./cmd/slack-claude-bot
+    print_status "Running: go build -o $PROJECT_DIR/$SERVICE_NAME ./cmd/slack-claude-bot"
+    go build -o "$PROJECT_DIR/$SERVICE_NAME" ./cmd/slack-claude-bot
     
     # Set permissions
-    chown $SERVICE_USER:$SERVICE_USER "/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/$SERVICE_NAME"
-    chmod 755 "/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/$SERVICE_NAME"
+    chown $SERVICE_USER:$SERVICE_USER "$PROJECT_DIR/$SERVICE_NAME"
+    chmod 755 "$PROJECT_DIR/$SERVICE_NAME"
     
     print_success "Built and installed application binary"
 }
@@ -158,14 +167,14 @@ copy_configuration() {
     # Check if .env file exists in project directory and copy it
     if [[ -f "$PROJECT_DIR/.env" ]]; then
         print_status "Found existing .env file in project directory, copying it..."
-        sudo -u $SERVICE_USER cp "$PROJECT_DIR/.env" "/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env"
-        chown $SERVICE_USER:$SERVICE_USER "/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env"
-        chmod 640 "/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env"
-        print_success "Copied existing .env to /home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env"
+        sudo -u $SERVICE_USER cp "$PROJECT_DIR/.env" "$PROJECT_DIR/.env"
+        chown $SERVICE_USER:$SERVICE_USER "$PROJECT_DIR/.env"
+        chmod 640 "$PROJECT_DIR/.env"
+        print_success "Copied existing .env to $PROJECT_DIR/.env"
     # Create default environment file if it doesn't exist and no .env was copied
-    elif [[ ! -f "/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env" ]]; then
+    elif [[ ! -f "$PROJECT_DIR/.env" ]]; then
         print_status "Creating default environment file..."
-        sudo -u $SERVICE_USER tee "/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env" > /dev/null << 'EOF'
+        sudo -u $SERVICE_USER tee "$PROJECT_DIR/.env" > /dev/null << 'EOF'
 # claude-on-slack Configuration
 # Copy from claude-on-slack.env.example and customize
 
@@ -219,11 +228,11 @@ LOG_LEVEL=info
 LOG_FORMAT=json
 ENABLE_DEBUG=false
 EOF
-        chown $SERVICE_USER:$SERVICE_USER "/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env"
-        chmod 640 "/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env"
+        chown $SERVICE_USER:$SERVICE_USER "$PROJECT_DIR/.env"
+        chmod 640 "$PROJECT_DIR/.env"
         print_success "Created default environment file"
     else
-        print_warning "Environment file already exists at /home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env"
+        print_warning "Environment file already exists at $PROJECT_DIR/.env"
     fi
 }
 
@@ -263,11 +272,11 @@ MemoryMax=1G
 
 # Environment
 Environment=HOME=$WORK_DIR
-EnvironmentFile=/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env
-WorkingDirectory=/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack
+EnvironmentFile=$PROJECT_DIR/.env
+WorkingDirectory=$PROJECT_DIR
 
 # Command
-ExecStart=/home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/slack-claude-bot
+ExecStart=$PROJECT_DIR/slack-claude-bot
 ExecReload=/bin/kill -HUP \$MAINPID
 
 # Logging
@@ -306,7 +315,7 @@ show_instructions() {
     echo
     print_status "Next steps:"
     echo "1. Edit the configuration file:"
-    echo "   nano /home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env"
+    echo "   nano $PROJECT_DIR/.env"
     echo
     echo "2. Add your Slack tokens and configure user access:"
     echo "   SLACK_BOT_TOKEN=xoxb-your-token"
@@ -328,8 +337,8 @@ show_instructions() {
     echo "   curl http://localhost:8080/health"
     echo
     print_status "Service files located at:"
-    echo "- Binary: /home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/$SERVICE_NAME"
-    echo "- Config: /home/$SERVICE_USER/files/projects/ghabxph/claude-on-slack/.env"
+    echo "- Binary: $PROJECT_DIR/$SERVICE_NAME"
+    echo "- Config: $PROJECT_DIR/.env"
     echo "- Logs: $LOG_DIR/ (also in journalctl)"
     echo "- Working Dir: $WORK_DIR ($SERVICE_USER's home)"
     echo "- Service: /etc/systemd/system/$SERVICE_NAME.service"

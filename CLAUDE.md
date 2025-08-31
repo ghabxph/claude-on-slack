@@ -1,5 +1,24 @@
 # Claude on Slack Project Knowledge Base
 
+## 🚧 **DEVELOPMENT STATUS: ALPHA/BETA**
+
+**⚠️ CRITICAL**: This project is in active development and **NOT production-ready**. 
+
+### **Current Development State**
+- **Stability**: Known bugs and ongoing stability issues
+- **Testing**: Limited test coverage, manual testing only
+- **Breaking Changes**: Expected with each update
+- **Production Use**: **NOT RECOMMENDED**
+
+### **Path to Production Readiness**
+The project will be considered **stable** when:
+1. **TDD Implementation**: Full Test-Driven Development practices
+2. **Test Coverage**: Comprehensive automated test suite
+3. **CI/CD Pipeline**: Automated testing and deployment
+4. **Regression Protection**: New features don't break existing functionality
+
+**Until TDD is fully implemented, expect bugs and instability.**
+
 ## 🎯 Implemented Features
 
 ### Core Functionality

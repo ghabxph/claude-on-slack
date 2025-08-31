@@ -2,7 +2,7 @@
 
 set -e  # Exit on any error
 
-echo "🚀 Starting claude-on-slack redeploy v2.5.0..."
+echo "🚀 Starting claude-on-slack redeploy v2.5.1..."
 
 # Configuration
 SERVICE_NAME="slack-claude-bot"
@@ -77,11 +77,15 @@ echo "✅ Binary deployed successfully:"
 ls -la /opt/claude-on-slack/claude-on-slack
 echo "SHA256: $(sudo sha256sum /opt/claude-on-slack/claude-on-slack)"
 
-# Update systemd service to use the secure environment file path
-echo "Updating systemd service environment file path..."
+# Update systemd service configuration
+echo "Updating systemd service configuration..."
 sudo sed -i 's|EnvironmentFile=.*|EnvironmentFile=-/opt/claude-on-slack/.env|g' /etc/systemd/system/claude-on-slack.service
+sudo sed -i 's|Restart=always|Restart=no|g' /etc/systemd/system/claude-on-slack.service
+sudo sed -i '/^RestartSec=/d' /etc/systemd/system/claude-on-slack.service
 sudo systemctl daemon-reload
-echo "✅ Systemd service updated to use /opt/claude-on-slack/.env"
+echo "✅ Systemd service updated:"
+echo "  • Environment: /opt/claude-on-slack/.env"
+echo "  • Restart policy: disabled (app handles restarts)"
 
 # Determine docker compose command
 if command -v docker-compose >/dev/null 2>&1; then
@@ -205,96 +209,5 @@ echo "• Logs: sudo journalctl -u claude-on-slack.service -f"
 echo "• Stop: sudo systemctl stop claude-on-slack.service"
 echo "• Restart: sudo systemctl restart claude-on-slack.service"
 
-# Skip old systemd service creation
-if false; then
-echo "Updating systemd service file..."
-sudo tee "/etc/systemd/system/$SERVICE_NAME.service" > /dev/null << EOF
-[Unit]
-Description=Claude on Slack Bot (Auto-deployed)
-Documentation=https://github.com/ghabxph/claude-on-slack
-After=network.target
-Wants=network.target
-
-[Service]
-Type=simple
-User=$CURRENT_USER
-Group=$CURRENT_USER
-WorkingDirectory=/home/$CURRENT_USER/files/projects/ghabxph/claude-on-slack
-ExecStart=/home/$CURRENT_USER/files/projects/ghabxph/claude-on-slack/slack-claude-bot
-EnvironmentFile=-/home/$CURRENT_USER/files/projects/ghabxph/claude-on-slack/.env
-Restart=always
-RestartSec=10
-
-# Minimal security settings for personal use
-NoNewPrivileges=yes
-PrivateTmp=no
-
-# Full file system access for personal bot
-# ProtectSystem=false (commented out for full access)
-# ProtectHome=false (commented out for home access)
-
-# Resource limits
-LimitNOFILE=65536
-MemoryMax=1G
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=$SERVICE_NAME
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Reload systemd and start service
-echo "Reloading systemd configuration..."
-sudo systemctl daemon-reload
-
-echo "Starting systemd service..."
-sudo systemctl enable $SERVICE_NAME || true
-sudo systemctl start $SERVICE_NAME
-
-# 7. Wait for service startup and verify
-echo "Waiting for service to start..."
-sleep 5
-
-# Check systemd service status
-if sudo systemctl is-active --quiet $SERVICE_NAME; then
-    echo "✅ SystemD service is running"
-else
-    echo "❌ SystemD service failed to start!"
-    echo "Check status: sudo systemctl status $SERVICE_NAME"
-    echo "Check logs: sudo journalctl -u $SERVICE_NAME -f"
-    exit 1
-fi
-
-# 8. Verify service health endpoint
-echo "Verifying service health..."
-HEALTH_PORT="${SERVER_PORT:-8080}"
-for i in {1..10}; do
-    if curl -f http://localhost:$HEALTH_PORT/health > /dev/null 2>&1; then
-        echo "✅ Health check passed!"
-        break
-    fi
-    if [ $i -eq 10 ]; then
-        echo "❌ Health check failed after 10 attempts!"
-        echo "Check logs: sudo journalctl -u $SERVICE_NAME -f"
-        exit 1
-    fi
-    echo "⏳ Waiting for health endpoint... (attempt $i/10)"
-    sleep 2
-done
-
-echo ""
-echo "📊 Final Status:"
-echo "• SystemD Service: $(sudo systemctl is-active $SERVICE_NAME)"
-echo "• Health Check: $(curl -s http://localhost:$HEALTH_PORT/health | head -c 100)"
-echo ""
-echo "✅ Deployment completed successfully!"
-echo ""
-echo "📋 Service Management:"
-echo "• Status: sudo systemctl status $SERVICE_NAME"
-echo "• Logs: sudo journalctl -u $SERVICE_NAME -f"
-echo "• Stop: sudo systemctl stop $SERVICE_NAME"
-echo "• Restart: sudo systemctl restart claude-on-slack.service"
-fi
+# Note: Legacy systemd service creation code has been removed.
+# The service now uses /opt/claude-on-slack/ for deployment.

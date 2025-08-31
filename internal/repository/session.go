@@ -100,7 +100,7 @@ func (r *SessionRepository) CreateChildSession(childSession *ChildSession) error
 
 // GetConversationTree loads entire conversation tree for O(1) memory processing
 func (r *SessionRepository) GetConversationTree(rootParentID int) ([]*ChildSession, error) {
-	query := `SELECT * FROM child_sessions WHERE root_parent_id = $1 ORDER BY id`
+	query := `SELECT id, session_id, previous_session_id, root_parent_id, ai_response, user_prompt, summary, created_at, updated_at FROM child_sessions WHERE root_parent_id = $1 ORDER BY id`
 	
 	rows, err := r.db.GetDB().Query(query, rootParentID)
 	if err != nil {
@@ -125,7 +125,7 @@ func (r *SessionRepository) GetConversationTree(rootParentID int) ([]*ChildSessi
 
 // GetSessionBySessionID retrieves a root session by its session ID
 func (r *SessionRepository) GetSessionBySessionID(sessionID string) (*Session, error) {
-	query := `SELECT * FROM sessions WHERE session_id = $1`
+	query := `SELECT id, session_id, working_directory, system_user, user_prompt, created_at, updated_at FROM sessions WHERE session_id = $1`
 	
 	session := &Session{}
 	err := r.db.GetDB().QueryRow(query, sessionID).Scan(
@@ -144,7 +144,7 @@ func (r *SessionRepository) GetSessionBySessionID(sessionID string) (*Session, e
 
 // FindLeafChild finds the latest child session (conversation endpoint)
 func (r *SessionRepository) FindLeafChild(rootParentID int) (*ChildSession, error) {
-	query := `SELECT * FROM child_sessions WHERE root_parent_id = $1 ORDER BY id DESC LIMIT 1`
+	query := `SELECT id, session_id, previous_session_id, root_parent_id, ai_response, user_prompt, summary, created_at, updated_at FROM child_sessions WHERE root_parent_id = $1 ORDER BY id DESC LIMIT 1`
 	
 	child := &ChildSession{}
 	err := r.db.GetDB().QueryRow(query, rootParentID).Scan(
@@ -190,7 +190,7 @@ func (r *SessionRepository) UpdateChildUserPrompt(childID int, prompt string) er
 
 // GetChannelState retrieves the active session state for a Slack channel
 func (r *SessionRepository) GetChannelState(channelID string) (*SlackChannel, error) {
-	query := `SELECT * FROM slack_channels WHERE channel_id = $1`
+	query := `SELECT id, channel_id, active_session_id, active_child_session_id, created_at, updated_at, permission FROM slack_channels WHERE channel_id = $1`
 	
 	channel := &SlackChannel{}
 	err := r.db.GetDB().QueryRow(query, channelID).Scan(
@@ -239,7 +239,7 @@ func (r *SessionRepository) UpdateChannelState(channelID string, activeSessionID
 
 // ListAllSessions returns all sessions with their paths, ordered by most recent
 func (r *SessionRepository) ListAllSessions(limit int) ([]*Session, error) {
-	query := `SELECT * FROM sessions ORDER BY updated_at DESC LIMIT $1`
+	query := `SELECT id, session_id, working_directory, system_user, user_prompt, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT $1`
 	
 	rows, err := r.db.GetDB().Query(query, limit)
 	if err != nil {
@@ -286,7 +286,7 @@ func (r *SessionRepository) GetUniqueWorkingDirectories(limit int) ([]string, er
 
 // GetSessionByID retrieves a session by database ID
 func (r *SessionRepository) GetSessionByID(id int) (*Session, error) {
-	query := `SELECT * FROM sessions WHERE id = $1`
+	query := `SELECT id, session_id, working_directory, system_user, user_prompt, created_at, updated_at FROM sessions WHERE id = $1`
 	
 	session := &Session{}
 	err := r.db.GetDB().QueryRow(query, id).Scan(
@@ -305,7 +305,7 @@ func (r *SessionRepository) GetSessionByID(id int) (*Session, error) {
 
 // GetSessionsByWorkingDirectory returns sessions that match a specific working directory
 func (r *SessionRepository) GetSessionsByWorkingDirectory(workingDir string, limit int) ([]*Session, error) {
-	query := `SELECT * FROM sessions WHERE working_directory = $1 ORDER BY updated_at DESC LIMIT $2`
+	query := `SELECT id, session_id, working_directory, system_user, user_prompt, created_at, updated_at FROM sessions WHERE working_directory = $1 ORDER BY updated_at DESC LIMIT $2`
 	
 	rows, err := r.db.GetDB().Query(query, workingDir, limit)
 	if err != nil {

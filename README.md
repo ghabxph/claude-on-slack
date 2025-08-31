@@ -1,6 +1,10 @@
 # Claude on Slack
 
-**🤖 Your Personal AI Assistant - Jarvis in Chat Mode**
+**🚧 DEVELOPMENT STATUS - ALPHA/BETA VERSION 🚧**
+
+**⚠️ This project is currently in active development and not yet production-ready. Expect bugs, breaking changes, and incomplete features.**
+
+**🤖 Your Personal AI Assistant - Jarvis in Chat Mode (In Development)**
 
 **Code from anywhere - even your mobile phone!** Claude on Slack brings the power of programming to your fingertips through natural conversation with AI, accessible wherever you have Slack.
 
@@ -22,10 +26,15 @@ The real reason I built this is to eventually control **all my devices** by just
 - **Automated Workflows**: Create intelligent scripts that respond to natural language commands
 - **Device Orchestration**: Coordinate multiple systems and devices through conversational AI
 
-### 🔧 **Current State: The Foundation**
-**Honest Reality**: There are no explicit home automation libraries integrated yet - this is the foundation that makes it all possible.
+### 🔧 **Current State: Active Development**
+**Honest Reality**: This project is in active development with ongoing bugs and stability issues. It's not production-ready yet.
 
-**But here's the magic**: Being able to code through conversation is the **entry point** to controlling anything programmatically! Want to control your lights? Write a script. Need to monitor your servers? Code it up. Want to automate your morning routine? Program it through chat.
+**Development Roadmap**: 
+- **Current Focus**: Stabilizing core functionality and fixing critical bugs
+- **Next Priority**: Implementing Test-Driven Development (TDD) practices
+- **Stability Milestone**: The project will be considered stable when TDD is fully integrated, ensuring new features don't break existing functionality
+
+**But here's the magic**: Even in development, being able to code through conversation is the **entry point** to controlling anything programmatically! Want to control your lights? Write a script. Need to monitor your servers? Code it up. Want to automate your morning routine? Program it through chat.
 
 **Your imagination is your limit** - and now you have the tools to build anything you can dream up! 🎨
 
@@ -127,6 +136,8 @@ Worth it? For me, absolutely. Your mileage may vary! 💸
 
 ## 🚀 Quick Start
 
+**⚠️ DEVELOPMENT WARNING**: This setup is for **developers and early adopters** only. Expect to encounter bugs and may need to troubleshoot issues during setup and usage.
+
 ### 🤖 **Golden Rule: Let Claude Do The Heavy Lifting!**
 
 **Most importantly, to save yourself from headache, just use Claude to help you set this up - like I do!**
@@ -158,7 +169,9 @@ I need help with:
 
 ### Manual Installation
 
-If you prefer to set up manually, here are the prerequisites and steps:
+**⚠️ PROCEED WITH CAUTION**: Manual installation is **not recommended** for production use. This is an active development project with frequent breaking changes and known bugs.
+
+If you prefer to set up manually for **development/testing purposes**, here are the prerequisites and steps:
 
 #### Prerequisites
 
@@ -430,7 +443,7 @@ Interactive and stateful session management with database integration:
 #### New Features
 - **Interactive Session Listing**: `/session` shows available sessions with timestamps and paths
 - **Path Suggestions**: Smart path suggestions based on previous sessions
-- **Default Path Suggestion**: Suggests `/home/zero/files/projects/ghabxph/claude` when no sessions exist
+- **Default Path Suggestion**: Uses the configured `$WORKING_DIRECTORY` when no sessions exist
 - **Path-based Session Management**: Switch to or create sessions for specific paths with `/session . <path>`
 - **Session Creation with Paths**: Create new sessions with specific working directories
 - **Session History**: Browse and resume from previous conversations
@@ -477,11 +490,37 @@ This will help you:
 
 Check `CLAUDE.md` for more planned features!
 
-## 🆘 Support
+## 🚧 Development Status & Roadmap
 
-- Check `CLAUDE.md` for detailed feature list and roadmap
-- Report issues via [GitHub Issues](https://github.com/ghabxph/claude-on-slack/issues)
+### **Current State: Alpha/Beta**
+- **Functionality**: Core features working but with known bugs
+- **Stability**: Expect breaking changes and system instability  
+- **Testing**: Limited test coverage - manual testing only
+- **Production Readiness**: **NOT READY** for production use
+
+### **Path to Stability**
+- **Phase 1**: Bug fixes and stability improvements (current focus)
+- **Phase 2**: Implement Test-Driven Development (TDD) practices
+- **Phase 3**: Comprehensive test suite covering all features
+- **Phase 4**: Production-ready release with stability guarantees
+
+### **TDD Implementation Priority**
+The project will be considered **stable and production-ready** when:
+- ✅ Full TDD practices are implemented
+- ✅ Comprehensive test coverage (unit, integration, end-to-end)
+- ✅ CI/CD pipeline with automated testing
+- ✅ Feature additions don't break existing functionality
+- ✅ Regression testing for all critical paths
+
+**Until TDD is fully integrated, expect bugs and breaking changes with each update.**
+
+## 🆘 Support & Contributing
+
+**For Developers & Early Adopters:**
+- Check `CLAUDE.md` for detailed feature list and current development status
+- Report bugs via [GitHub Issues](https://github.com/ghabxph/claude-on-slack/issues) - **include full logs and reproduction steps**
 - Join discussions in [GitHub Discussions](https://github.com/ghabxph/claude-on-slack/discussions)
+- **Contributions welcome** - especially for test coverage and stability improvements!
 
 ---
 

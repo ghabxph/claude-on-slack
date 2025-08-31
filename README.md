@@ -29,10 +29,38 @@ The real reason I built this is to eventually control **all my devices** by just
 ### 🔧 **Current State: Active Development**
 **Honest Reality**: This project is in active development with ongoing bugs and stability issues. It's not production-ready yet.
 
-**Development Roadmap**: 
-- **Current Focus**: Stabilizing core functionality and fixing critical bugs
-- **Next Priority**: Implementing Test-Driven Development (TDD) practices
-- **Stability Milestone**: The project will be considered stable when TDD is fully integrated, ensuring new features don't break existing functionality
+**Development Roadmap to Stability**: 
+
+### 🎯 **Phase 1: Alpha Stabilization (Current)**
+- **Current Focus**: Core feature implementation and critical bug fixes
+- **Status**: Actively adding features while maintaining basic functionality
+- **Risk**: Things can easily break as we prioritize rapid development over stability
+
+### 🧪 **Phase 2: Test-Driven Development Migration (Next)**
+- **Goal**: Transition from "move fast and break things" to "move fast and don't break things"
+- **Approach**: 
+  - **High Code Coverage**: Implement comprehensive tests aiming for 80%+ coverage
+  - **Code Refactoring**: Restructure existing code into testable, mockable components
+  - **Test-First Development**: All new features must be written with tests first
+- **Key Principle**: **Tests should rarely change** - only when requirements are genuinely misunderstood
+- **Expected Duration**: 2-4 weeks of focused testing implementation
+
+### 🏆 **Phase 3: Production Stability (Future)**
+- **Milestone**: Project considered stable when TDD practices are fully integrated
+- **Definition of Stable**:
+  - Every new feature requires passing tests before merge
+  - Existing functionality protected by comprehensive test suite
+  - Breaking changes become extremely rare and intentional only
+  - Confident deployments with automated testing pipeline
+
+### 📋 **Testing Strategy**
+- **Unit Tests**: Core business logic, session management, database operations
+- **Integration Tests**: Slack API interactions, database connections, file operations  
+- **End-to-End Tests**: Complete user workflows from Slack message to Claude response
+- **Mocking Strategy**: External dependencies (Slack API, Claude CLI, database) properly mocked
+- **Continuous Integration**: All tests must pass before deployment
+
+**Timeline**: Currently in Phase 1, targeting Phase 2 completion by Q4 2025
 
 **But here's the magic**: Even in development, being able to code through conversation is the **entry point** to controlling anything programmatically! Want to control your lights? Write a script. Need to monitor your servers? Code it up. Want to automate your morning routine? Program it through chat.
 

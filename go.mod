@@ -12,5 +12,6 @@ require (
 
 require (
 	github.com/gorilla/websocket v1.5.0 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 )

@@ -2,6 +2,33 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.5.0] - 2025-08-31
+
+### Added - Centralized Error Logging System
+- **Dual-Output Logger**: All errors now sent to both console logs and originating Slack channel
+- **Real-time Error Visibility**: Detailed stack traces and error context visible directly in Slack chat  
+- **Context-Aware Reporting**: Every error includes channel, user, component, operation, and session information
+- **Ephemeral Error Messages**: Error details visible only to the user who triggered them (not channel-wide)
+- **Enhanced Debugging**: Stack trace extraction with exact code locations for faster troubleshooting
+
+### Fixed - Critical Database Issues
+- **SQL Scan Mismatch**: Fixed column order mismatch in `slack_channels` table scan operation
+- **Hardcoded Error Messages**: Replaced hardcoded error returns with centralized error logging
+- **Database Schema Alignment**: Corrected `GetChannelState()` scan order to match actual database column sequence
+- **Permission Column Position**: Fixed scanning `permission` field from correct database position (column 6)
+
+### Enhanced - Error Handling
+- **Stack Trace Integration**: Added automatic stack trace capture and location detection
+- **JSON-Safe Formatting**: Error messages properly formatted for Slack API compatibility
+- **Component Identification**: All errors tagged with specific component and operation context
+- **Background Error Logging**: Errors logged to console even if Slack posting fails
+
+### Technical - Architecture Improvements  
+- **DualLogger Package**: New `internal/logging/dual_logger.go` for centralized error management
+- **Service Integration**: Updated main Service struct to use dual logger throughout
+- **Channel Context Propagation**: All error-prone functions now receive channel/user context
+- **Error Context Structure**: Structured error reporting with predefined context fields
+
 ## [2.3.0] - 2025-08-30
 
 ### Fixed - Database Schema Redesign  

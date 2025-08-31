@@ -40,11 +40,11 @@ func (n *DeploymentNotifier) FormatDeploymentMessage(version string, changes []s
 			message += fmt.Sprintf("• %s\n", change)
 		}
 	} else {
-		message += "• 🔗 **Session Continuity Fix** - Resolved conversation resume failures\n"
-		message += "• 🎯 **Proper Session Management** - Fixed child session creation logic\n"
-		message += "• 🔧 **Session Logic Fixed** - Properly detects first messages vs resume based on child sessions\n"
-		message += "• ✅ **New Session Support** - /session new followed by messages now works correctly\n"
-		message += "• 🎯 **Correct CLI Usage** - Uses --session-id for first messages, --resume for continuations\n"
+		message += "• 🚨 **Centralized Error Logging** - All errors now sent to both console and Slack channel\n"
+		message += "• 📍 **Channel Context Tracking** - Every error includes channel and user context\n"
+		message += "• 🔍 **Enhanced Debugging** - Detailed stack traces and error locations visible in Slack\n"
+		message += "• ⚡ **Real-time Error Reporting** - Instant error visibility for faster issue resolution\n"
+		message += "• 🔧 **Fixed Critical Bug** - Resolved hardcoded error messages in /session command\n"
 	}
 	
 	message += "\n📋 *Full details*: See <https://github.com/ghabxph/claude-on-slack/blob/main/CHANGELOG.md|CHANGELOG.md>\n"

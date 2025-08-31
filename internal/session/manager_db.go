@@ -410,7 +410,11 @@ func (s *DbSessionInfo) GetUserID() string                     { return s.System
 func (s *DbSessionInfo) GetChannelID() string                  { return "" } // Not stored in DB session
 func (s *DbSessionInfo) GetWorkspaceDir() string               { return s.WorkingDirectory }
 func (s *DbSessionInfo) GetCurrentWorkDir() string             { return s.WorkingDirectory }
-func (s *DbSessionInfo) GetPermissionMode() config.PermissionMode { return config.PermissionModeDefault } // Default for DB sessions
+func (s *DbSessionInfo) GetPermissionMode() config.PermissionMode { 
+	// Note: Permissions are now channel-based, not session-based
+	// This method is deprecated - use ChannelPermissionManager methods instead
+	return config.PermissionModeDefault 
+}
 func (s *DbSessionInfo) GetCreatedAt() time.Time               { return s.CreatedAt }
 func (s *DbSessionInfo) GetLastActivity() time.Time            { return s.UpdatedAt }
 func (s *DbSessionInfo) IsActive() bool                        { return true } // DB sessions are considered active
@@ -472,19 +476,62 @@ func (m *DatabaseManager) CheckRateLimit(sessionID string) (bool, time.Duration,
 	return false, 0, nil
 }
 
-// SetPermissionMode sets the permission mode for a database session
+// SetPermissionMode sets the permission mode for a database session (now channel-based)
 func (m *DatabaseManager) SetPermissionMode(sessionID string, mode config.PermissionMode) error {
-	// Database sessions don't store permission mode yet - could be added to schema
-	m.logger.Debug("SetPermissionMode called", 
-		zap.String("session_id", sessionID),
+	// Find which channel this session belongs to
+	channelID, err := m.findChannelForSession(sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to find channel for session: %w", err)
+	}
+	
+	return m.SetPermissionModeForChannel(channelID, mode)
+}
+
+// GetPermissionMode gets the permission mode for a database session (now channel-based)
+func (m *DatabaseManager) GetPermissionMode(sessionID string) (config.PermissionMode, error) {
+	// Find which channel this session belongs to
+	channelID, err := m.findChannelForSession(sessionID)
+	if err != nil {
+		return config.PermissionModeDefault, err
+	}
+	
+	return m.GetPermissionModeForChannel(channelID)
+}
+
+// SetPermissionModeForChannel sets the permission mode for a specific channel
+func (m *DatabaseManager) SetPermissionModeForChannel(channelID string, mode config.PermissionMode) error {
+	// Update permission in database
+	err := m.repository.UpdateChannelPermission(channelID, string(mode))
+	if err != nil {
+		return fmt.Errorf("failed to update channel permission: %w", err)
+	}
+	
+	m.logger.Debug("Channel permission mode updated", 
+		zap.String("channel_id", channelID),
 		zap.String("mode", string(mode)))
 	return nil
 }
 
-// GetPermissionMode gets the permission mode for a database session
-func (m *DatabaseManager) GetPermissionMode(sessionID string) (config.PermissionMode, error) {
-	// Return default mode for now
-	return config.PermissionModeDefault, nil
+// GetPermissionModeForChannel gets the permission mode for a specific channel
+func (m *DatabaseManager) GetPermissionModeForChannel(channelID string) (config.PermissionMode, error) {
+	permission, err := m.repository.GetChannelPermission(channelID)
+	if err != nil {
+		return config.PermissionModeDefault, err
+	}
+	
+	return config.PermissionMode(permission), nil
+}
+
+// findChannelForSession finds which channel a session belongs to
+func (m *DatabaseManager) findChannelForSession(sessionID string) (string, error) {
+	// Get session to find its DB ID
+	session, err := m.getSessionBySessionID(sessionID)
+	if err != nil {
+		return "", err
+	}
+	
+	// Use repository method to find channel
+	return m.repository.FindChannelForSession(session.ID)
 }
 
 // UpdateLatestResponse updates the latest response for a database session

@@ -49,6 +49,12 @@ type SessionManager interface {
 	Stop()
 }
 
+// ChannelPermissionManager is an optional extension interface for channel-based permissions
+type ChannelPermissionManager interface {
+	SetPermissionModeForChannel(channelID string, mode config.PermissionMode) error
+	GetPermissionModeForChannel(channelID string) (config.PermissionMode, error)
+}
+
 // SessionInfo provides a common interface for session data
 type SessionInfo interface {
 	GetID() string

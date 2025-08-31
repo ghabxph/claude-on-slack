@@ -27,6 +27,7 @@ import (
 	"github.com/ghabxph/claude-on-slack/internal/config"
 	"github.com/ghabxph/claude-on-slack/internal/database"
 	"github.com/ghabxph/claude-on-slack/internal/files"
+	"github.com/ghabxph/claude-on-slack/internal/logging"
 	"github.com/ghabxph/claude-on-slack/internal/notifications"
 	"github.com/ghabxph/claude-on-slack/internal/session"
 	"github.com/ghabxph/claude-on-slack/internal/version"
@@ -36,6 +37,7 @@ import (
 type Service struct {
 	config         *config.Config
 	logger         *zap.Logger
+	dualLogger     *logging.DualLogger
 	slackAPI       *slack.Client
 	socketClient   *socketmode.Client
 	httpServer     *http.Server
@@ -86,9 +88,13 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 	}
 	fileCleanup := files.NewCleanupService(fileDownloader, logger)
 
+	// Initialize dual logger for centralized error reporting
+	dualLogger := logging.NewDualLogger(logger, slackAPI)
+
 	service := &Service{
 		config:         cfg,
 		logger:         logger,
+		dualLogger:     dualLogger,
 		slackAPI:       slackAPI,
 		socketClient:   socketClient,
 		authService:    authService,
@@ -384,7 +390,8 @@ func (s *Service) processMessage(ctx context.Context, event *slackevents.Message
 	// Check authorization
 	if err := s.authService.AuthorizeUser(authCtx, auth.PermissionRead); err != nil {
 		s.logger.Warn("Authorization failed", zap.Error(err))
-		return fmt.Sprintf("❌ Authorization failed: %v", err)
+		errCtx := logging.CreateErrorContext(event.Channel, event.User, "message_processor", "authorization")
+		return s.logErrorWithTrace(ctx, errCtx, err, "Authorization failed")
 	}
 
 	// Parse message
@@ -501,15 +508,17 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 	// Get or create session
 	userSession, err := s.sessionManager.GetOrCreateSession(event.User, event.Channel)
 	if err != nil {
-		s.logger.Error("Failed to get session", zap.Error(err))
-		return fmt.Sprintf("❌ Failed to create session: %v", err)
+		errCtx := logging.CreateErrorContext(event.Channel, event.User, "message_processor", "create_session")
+		return s.logErrorWithTrace(ctx, errCtx, err, "Failed to create session")
 	}
 
 	// Check if we should queue this message
 	queued, err := s.sessionManager.QueueMessage(userSession.GetID(), text)
 	if err != nil {
 		s.logger.Error("Failed to check message queue", zap.Error(err))
-		return fmt.Sprintf("❌ Failed to process message: %v", err)
+		errCtx := logging.CreateErrorContext(event.Channel, event.User, "message_processor", "queue_message")
+		errCtx.WithSession(userSession.GetID())
+		return s.logErrorWithTrace(ctx, errCtx, err, "Failed to process message")
 	}
 
 	if queued {
@@ -547,7 +556,7 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 
 	// Send "Thinking..." message immediately and capture for deletion
 	// Get current mode
-	currentMode, err := s.sessionManager.GetPermissionMode(userSession.GetID())
+	currentMode, err := s.getPermissionModeForChannel(event.Channel, userSession.GetID())
 	if err != nil {
 		currentMode = config.PermissionModeDefault
 	}
@@ -598,8 +607,9 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 	// Check if there are any child sessions (actual Claude conversations)
 	latestChildSessionID, err := s.sessionManager.GetLatestChildSessionID(userSession.GetID())
 	if err != nil {
-		s.logger.Error("Failed to get latest child session ID", zap.Error(err))
-		return fmt.Sprintf("❌ Failed to get session info: %v", err)
+		errCtx := logging.CreateErrorContext(event.Channel, event.User, "message_processor", "get_session_info")
+		errCtx.WithSession(userSession.GetID())
+		return s.logErrorWithTrace(ctx, errCtx, err, "Failed to get session info")
 	}
 	
 	s.logger.Info("Session determination logic", 
@@ -627,7 +637,7 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 	}
 
 	// Get permission mode
-	permMode, permErr := s.sessionManager.GetPermissionMode(userSession.GetID())
+	permMode, permErr := s.getPermissionModeForChannel(event.Channel, userSession.GetID())
 	if permErr != nil {
 		s.logger.Error("Failed to get permission mode", zap.Error(permErr))
 		permMode = config.PermissionModeDefault
@@ -637,7 +647,9 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 	response, newClaudeSessionID, cost, rawJSON, err := s.claudeExecutor.ProcessClaudeCodeRequest(ctx, text, claudeSessionID, event.User, userSession.GetCurrentWorkDir(), allowedTools, isNewSession, permMode)
 	if err != nil {
 		s.logger.Error("Claude Code processing failed", zap.Error(err))
-		return fmt.Sprintf("❌ Claude Code processing failed: %v", err)
+		errCtx := logging.CreateErrorContext(event.Channel, event.User, "message_processor", "claude_processing")
+		errCtx.WithSession(claudeSessionID)
+		return s.logErrorWithTrace(ctx, errCtx, err, "Claude Code processing failed")
 	}
 	
 	// Store the latest response (raw JSON)
@@ -683,7 +695,7 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 		zap.Float64("cost_usd", cost))
 
 	// Format final response with Mode, Session, Working Dir, and Message Count
-	currentMode, getPermErr := s.sessionManager.GetPermissionMode(userSession.GetID())
+	currentMode, getPermErr := s.getPermissionModeForChannel(event.Channel, userSession.GetID())
 	if getPermErr != nil {
 		currentMode = config.PermissionModeDefault
 	}
@@ -926,7 +938,8 @@ func (s *Service) handleSetSessionCommand(ctx context.Context, event *slackevent
 		// Show current session info and available sessions
 		userSession, err := s.sessionManager.GetOrCreateSession(event.User, event.Channel)
 		if err != nil {
-			return "❌ Failed to get session info", err
+			errCtx := logging.CreateErrorContext(event.Channel, event.User, "session_command", "get_session_info")
+			return s.logErrorWithTrace(ctx, errCtx, err, "Failed to get session info"), err
 		}
 
 		currentSessionID := userSession.GetID()
@@ -938,6 +951,7 @@ func (s *Service) handleSetSessionCommand(ctx context.Context, event *slackevent
 		sessions, err := s.sessionManager.ListAllSessions(10)
 		if err != nil {
 			s.logger.Error("Failed to list sessions", zap.Error(err))
+			// Still continue - this is not a fatal error for the help display
 		}
 
 		// Get known paths
@@ -987,7 +1001,8 @@ func (s *Service) handleSetSessionCommand(ctx context.Context, event *slackevent
 		// Show detailed list of all sessions
 		response, err := s.handleSessionListCommand(event.User, event.Channel)
 		if err != nil {
-			return fmt.Sprintf("❌ Failed to list sessions: %v", err), err
+			errCtx := logging.CreateErrorContext(event.Channel, event.User, "session_command", "list_sessions")
+			return s.logErrorWithTrace(ctx, errCtx, err, "Failed to list sessions"), err
 		}
 		return response, nil
 	} else if args[0] == "new" {
@@ -1377,7 +1392,8 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 	if len(args) == 0 || args[0] == "help" {
 		userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
 		if err != nil {
-			return "❌ Failed to get session info"
+			errCtx := logging.CreateErrorContext(channelID, userID, "session_slash_command", "get_session_info")
+			return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to get session info")
 		}
 
 		currentSessionID := userSession.GetID()
@@ -1389,6 +1405,7 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 		sessions, err := s.sessionManager.ListAllSessions(10)
 		if err != nil {
 			s.logger.Error("Failed to list sessions", zap.Error(err))
+			// Still continue - this is not a fatal error for the help display
 		}
 
 		// Get known paths with default suggestion
@@ -1445,7 +1462,8 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 		// Show detailed list of all sessions
 		response, err := s.handleSessionListCommand(userID, channelID)
 		if err != nil {
-			return fmt.Sprintf("❌ Failed to list sessions: %v", err)
+			errCtx := logging.CreateErrorContext(channelID, userID, "session_slash_command", "list_sessions")
+			return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to list sessions")
 		}
 		return response
 	} else if args[0] == "new" {
@@ -1603,7 +1621,8 @@ func (s *Service) handleSessionListCommand(userID, channelID string) (string, er
 	sessions, err := s.sessionManager.ListAllSessions(20)
 	if err != nil {
 		s.logger.Error("Failed to list sessions", zap.Error(err))
-		return "❌ Failed to retrieve session list", err
+		errCtx := logging.CreateErrorContext(channelID, userID, "session_list", "retrieve_sessions")
+		return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to retrieve session list"), err
 	}
 
 	if len(sessions) == 0 {
@@ -1668,7 +1687,7 @@ func (s *Service) handlePermissionSlashCommand(userID, channelID, text string) s
 
 	// If no argument or "help", show help
 	if len(args) == 0 || args[0] == "help" {
-		currentMode, err := s.sessionManager.GetPermissionMode(userSession.GetID())
+		currentMode, err := s.getPermissionModeForChannel(channelID, userSession.GetID())
 		if err != nil {
 			currentMode = "default" // fallback
 		}
@@ -1691,8 +1710,14 @@ func (s *Service) handlePermissionSlashCommand(userID, channelID, text string) s
 		return "❌ **Invalid Permission Mode**\n\nAvailable modes:\n• `default`\n• `acceptEdits`\n• `bypassPermissions`\n• `plan`\n\nUse `/permission help` for more info."
 	}
 
-	// Set mode
-	if err := s.sessionManager.SetPermissionMode(userSession.GetID(), mode); err != nil {
+	// Set mode - use channel-based permissions if available
+	if channelPermMgr, ok := s.sessionManager.(session.ChannelPermissionManager); ok {
+		err = channelPermMgr.SetPermissionModeForChannel(channelID, mode)
+	} else {
+		err = s.sessionManager.SetPermissionMode(userSession.GetID(), mode)
+	}
+	
+	if err != nil {
 		return fmt.Sprintf("❌ Failed to set permission mode: %v", err)
 	}
 
@@ -1709,6 +1734,25 @@ func (s *Service) handlePermissionSlashCommand(userID, channelID, text string) s
 	}
 
 	return fmt.Sprintf("✅ **Permission Mode Set**\n\nMode: `%s`\nDescription: %s", mode, description)
+}
+
+// getPermissionModeForChannel is a helper that gets permission mode using channel ID when available
+func (s *Service) getPermissionModeForChannel(channelID string, fallbackSessionID string) (config.PermissionMode, error) {
+	// Use channel-based permissions if available
+	if channelPermMgr, ok := s.sessionManager.(session.ChannelPermissionManager); ok {
+		return channelPermMgr.GetPermissionModeForChannel(channelID)
+	}
+	// Fallback to session-based permissions
+	return s.sessionManager.GetPermissionMode(fallbackSessionID)
+}
+
+// logErrorWithTrace logs an error using the dual logger and returns a user-friendly message
+func (s *Service) logErrorWithTrace(ctx context.Context, errCtx *logging.ErrorContext, err error, message string) string {
+	// Use dual logger to send to both console and Slack
+	s.dualLogger.LogError(ctx, errCtx, err, message)
+	
+	// Return a simplified message for immediate response
+	return fmt.Sprintf("❌ %s: %v", message, err)
 }
 
 // IsImageMimeType checks if the given mime type is a supported image format

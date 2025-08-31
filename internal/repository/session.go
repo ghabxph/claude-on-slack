@@ -36,6 +36,7 @@ type SlackChannel struct {
 	ChannelID             string    `db:"channel_id"`
 	ActiveSessionID       *int      `db:"active_session_id"`
 	ActiveChildSessionID  *int      `db:"active_child_session_id"`
+	Permission            string    `db:"permission"`
 	CreatedAt             time.Time `db:"created_at"`
 	UpdatedAt             time.Time `db:"updated_at"`
 }
@@ -173,6 +174,7 @@ func (r *SessionRepository) UpdateSessionUserPrompt(sessionID string, prompt str
 }
 
 
+
 // UpdateChildUserPrompt updates the user prompt for a child session
 func (r *SessionRepository) UpdateChildUserPrompt(childID int, prompt string) error {
 	query := `UPDATE child_sessions SET user_prompt = $1, updated_at = NOW() WHERE id = $2`
@@ -192,7 +194,7 @@ func (r *SessionRepository) GetChannelState(channelID string) (*SlackChannel, er
 	channel := &SlackChannel{}
 	err := r.db.GetDB().QueryRow(query, channelID).Scan(
 		&channel.ID, &channel.ChannelID, &channel.ActiveSessionID,
-		&channel.ActiveChildSessionID, &channel.CreatedAt, &channel.UpdatedAt)
+		&channel.ActiveChildSessionID, &channel.CreatedAt, &channel.UpdatedAt, &channel.Permission)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -214,8 +216,8 @@ func (r *SessionRepository) UpdateChannelState(channelID string, activeSessionID
 
 	if existingChannel == nil {
 		// Create new channel state
-		query := `INSERT INTO slack_channels (channel_id, active_session_id, active_child_session_id, created_at, updated_at)
-				  VALUES ($1, $2, $3, NOW(), NOW())`
+		query := `INSERT INTO slack_channels (channel_id, active_session_id, active_child_session_id, permission, created_at, updated_at)
+				  VALUES ($1, $2, $3, 'default', NOW(), NOW())`
 		_, err = r.db.GetDB().Exec(query, channelID, activeSessionID, activeChildSessionID)
 		if err != nil {
 			return fmt.Errorf("failed to create channel state: %w", err)
@@ -344,6 +346,50 @@ func (r *SessionRepository) CountMessagesInConversationTree(rootParentID int) (i
 		zap.Int("total_exchanges", totalExchanges))
 	
 	return totalExchanges, nil
+}
+
+// UpdateChannelPermission updates the permission mode for a Slack channel
+func (r *SessionRepository) UpdateChannelPermission(channelID string, permission string) error {
+	query := `UPDATE slack_channels SET permission = $1, updated_at = NOW() WHERE channel_id = $2`
+	
+	_, err := r.db.GetDB().Exec(query, permission, channelID)
+	if err != nil {
+		return fmt.Errorf("failed to update channel permission: %w", err)
+	}
+
+	return nil
+}
+
+// GetChannelPermission retrieves the permission mode for a Slack channel
+func (r *SessionRepository) GetChannelPermission(channelID string) (string, error) {
+	channel, err := r.GetChannelState(channelID)
+	if err != nil {
+		return "", err
+	}
+	
+	if channel == nil {
+		// Channel doesn't exist, return default permission
+		return "default", nil
+	}
+	
+	return channel.Permission, nil
+}
+
+// FindChannelForSession finds which channel a session belongs to
+func (r *SessionRepository) FindChannelForSession(sessionDBID int) (string, error) {
+	query := `SELECT channel_id FROM slack_channels 
+			  WHERE active_session_id = $1 
+			  OR active_child_session_id IN (
+				  SELECT id FROM child_sessions WHERE root_parent_id = $1
+			  )`
+	
+	var channelID string
+	err := r.db.GetDB().QueryRow(query, sessionDBID).Scan(&channelID)
+	if err != nil {
+		return "", fmt.Errorf("failed to find channel for session DB ID %d: %w", sessionDBID, err)
+	}
+	
+	return channelID, nil
 }
 
 // DeleteSession deletes a session and all its associated child sessions

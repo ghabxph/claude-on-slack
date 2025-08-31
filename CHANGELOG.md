@@ -2,6 +2,13 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.6.2] - 2025-08-31
+
+### Enhanced - Slack Formatting & User Experience  
+- **Slack-Compatible Formatting**: Added explicit instructions to format responses for optimal Slack display using Slack syntax instead of markdown
+- **Better Visual Presentation**: Ensures proper rendering of bold, italic, code blocks, and lists in Slack interface
+- **Conditional Markdown**: Only use markdown formatting when explicitly requested by users
+
 ## [2.6.1] - 2025-08-31
 
 ### Enhanced - System Prompt & Task Management

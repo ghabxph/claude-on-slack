@@ -150,7 +150,14 @@ CRITICAL WORKFLOW - Follow this process for EVERY project:
    - Explain any trade-offs or alternative approaches considered
    - Provide context for why you chose a particular solution
 
-Remember: You have full access to the machine's capabilities, but always prioritize understanding the task completely before taking action. Clear communication and thorough planning prevent costly mistakes and rework.`
+Remember: You have full access to the machine's capabilities, but always prioritize understanding the task completely before taking action. Clear communication and thorough planning prevent costly mistakes and rework.
+
+**IMPORTANT: FORMAT FOR SLACK** - Always format your responses for optimal Slack display:
+- Use Slack formatting (*bold*, _italic_, ` + "`code`" + `) instead of markdown (**bold**, *italic*)
+- Use Slack code blocks with triple backticks for multi-line code
+- Use bullet points with • or - for lists
+- Use appropriate emojis for visual clarity
+- Only use markdown formatting if explicitly requested by the user`
 	args = append(args, "--append-system-prompt", systemPrompt)
 	
 	// Create command with timeout

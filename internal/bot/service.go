@@ -1518,9 +1518,13 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 
 		if len(existingSessions) == 0 {
 			// No existing sessions for this path, create a new one
-			// For database sessions, no session manipulation needed
+			newSession, err := s.sessionManager.CreateSessionWithPath(userID, channelID, newPath)
+			if err != nil {
+				s.logger.Error("Failed to create new session for path", zap.Error(err))
+				return fmt.Sprintf("❌ **Error:** Failed to create session for path: %v", err)
+			}
 
-			return fmt.Sprintf("✅ **New Session Created for Path**\n\nWorking directory: `%s`\nNext message will start a fresh conversation in this path.", newPath)
+			return fmt.Sprintf("✅ **New Session Created for Path**\n\nSession ID: `%s`\nWorking directory: `%s`\nNext message will start a fresh conversation in this path.", newSession.GetID(), newPath)
 		} else {
 			// Found existing sessions, let user choose
 			response := fmt.Sprintf("📋 **Found %d existing session(s) for path:** `%s`\n\n", len(existingSessions), newPath)

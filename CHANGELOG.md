@@ -2,6 +2,24 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.5.6] - 2025-08-31
+
+### Fixed - Session Path Switching Bug
+- **Critical Fix**: Fixed completely broken `/session . <path>` command that only showed success message without creating session
+- **Actual Session Creation**: Command now properly creates new session with specified working directory
+- **Channel State Update**: Session switching now properly updates channel to use new session with correct working directory
+- **Error Handling**: Added proper error handling and logging for session creation failures
+
+### Enhanced - Session Management
+- **Working Directory Control**: `/session . <path>` now actually switches to specified working directory
+- **Session Consistency**: Ensures new sessions are properly created and linked to channels
+- **User Experience**: Command now works as documented and expected
+
+### Technical - Bug Resolution
+- **Database Operations**: Added missing `CreateSessionWithPath()` call in session dot command handler
+- **State Management**: Proper channel state updating when creating sessions for new paths
+- **Logging**: Enhanced error logging for session creation debugging
+
 ## [2.5.5] - 2025-08-31
 
 ### Simplified - Deployment Notification System

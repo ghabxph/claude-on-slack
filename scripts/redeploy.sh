@@ -116,10 +116,18 @@ done
 
 # 5. Run database migrations
 echo "Running database migrations..."
-if [ -f "migrations/001_initial_schema.sql" ]; then
-    $DOCKER_COMPOSE exec -T postgres psql -U ${DB_USER:-claude_bot} -d ${DB_NAME:-claude_slack} -f /host_migrations/001_initial_schema.sql || true
-    $DOCKER_COMPOSE exec -T postgres psql -U ${DB_USER:-claude_bot} -d ${DB_NAME:-claude_slack} -f /host_migrations/002_indexes.sql || true
-    $DOCKER_COMPOSE exec -T postgres psql -U ${DB_USER:-claude_bot} -d ${DB_NAME:-claude_slack} -f /host_migrations/003_initial_data.sql || true
+if [ -d "migrations" ]; then
+    # Run all migration files in sequential order (001, 002, 003, etc.)
+    for migration_file in migrations/*.sql; do
+        if [ -f "$migration_file" ]; then
+            migration_name=$(basename "$migration_file")
+            echo "Running migration: $migration_name"
+            $DOCKER_COMPOSE exec -T postgres psql -U ${DB_USER:-claude_bot} -d ${DB_NAME:-claude_slack} -f "/host_migrations/$migration_name" || true
+        fi
+    done
+    echo "All migrations completed"
+else
+    echo "No migrations directory found"
 fi
 
 # 4. Start services back up

@@ -27,6 +27,7 @@ type ChildSession struct {
 	RootParentID      int       `db:"root_parent_id"`
 	AIResponse        *string   `db:"ai_response"`
 	UserPrompt        *string   `db:"user_prompt"`
+	Summary           *string   `db:"summary"`
 	CreatedAt         time.Time `db:"created_at"`
 	UpdatedAt         time.Time `db:"updated_at"`
 }
@@ -78,12 +79,12 @@ func (r *SessionRepository) CreateSession(session *Session) error {
 func (r *SessionRepository) CreateChildSession(childSession *ChildSession) error {
 	query := `
 		INSERT INTO child_sessions (session_id, previous_session_id, root_parent_id, 
-			ai_response, user_prompt, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+			ai_response, user_prompt, summary, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
 		RETURNING id`
 
 	err := r.db.GetDB().QueryRow(query, childSession.SessionID, childSession.PreviousSessionID,
-		childSession.RootParentID, childSession.AIResponse, childSession.UserPrompt).Scan(&childSession.ID)
+		childSession.RootParentID, childSession.AIResponse, childSession.UserPrompt, childSession.Summary).Scan(&childSession.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to create child session: %w", err)
@@ -111,7 +112,7 @@ func (r *SessionRepository) GetConversationTree(rootParentID int) ([]*ChildSessi
 	for rows.Next() {
 		child := &ChildSession{}
 		err := rows.Scan(&child.ID, &child.SessionID, &child.PreviousSessionID,
-			&child.RootParentID, &child.AIResponse, &child.UserPrompt,
+			&child.RootParentID, &child.AIResponse, &child.UserPrompt, &child.Summary,
 			&child.CreatedAt, &child.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan child session: %w", err)
@@ -148,7 +149,7 @@ func (r *SessionRepository) FindLeafChild(rootParentID int) (*ChildSession, erro
 	child := &ChildSession{}
 	err := r.db.GetDB().QueryRow(query, rootParentID).Scan(
 		&child.ID, &child.SessionID, &child.PreviousSessionID,
-		&child.RootParentID, &child.AIResponse, &child.UserPrompt,
+		&child.RootParentID, &child.AIResponse, &child.UserPrompt, &child.Summary,
 		&child.CreatedAt, &child.UpdatedAt)
 
 	if err != nil {

@@ -1425,7 +1425,7 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 			messageCount = 0
 		}
 		
-		response := fmt.Sprintf("📋 **Session Management Help**\n\n**Current Session:**\n• Claude Session ID: `%s`\n• Bot Session ID: `%s`\n• Messages: %d\n\n**Usage:**\n• `/session` - Show this help\n• `/session list` - Show detailed list of all sessions\n• `/session <claude-session-id>` - Switch to specific Claude session\n• `/session new <path>` - Start new conversation in specific path\n• `/session new` - Start new conversation in current directory\n• `/session . <path>` - Switch to or create session for specific path",
+		response := fmt.Sprintf("📋 **Session Management Help**\n\n**Current Session:**\n• Claude Session ID: `%s`\n• Bot Session ID: `%s`\n• Messages: %d\n\n**Usage:**\n• `/session` - Show this help\n• `/session list` - Show detailed list of all sessions\n• `/session info <uuid>` - Show child conversations for parent session\n• `/session <claude-session-id>` - Switch to specific Claude session\n• `/session new <path>` - Start new conversation in specific path\n• `/session new` - Start new conversation in current directory\n• `/session . <path>` - Switch to or create session for specific path",
 			currentSessionID, userSession.GetID(), messageCount)
 
 		if len(sessions) > 0 {
@@ -1466,6 +1466,12 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 			return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to list sessions")
 		}
 		return response
+	} else if args[0] == "info" {
+		// Show child conversations for a parent session
+		if len(args) < 2 {
+			return "❌ **Usage:** `/session info <parent-session-uuid>` - Show child conversations for parent session"
+		}
+		return s.handleSessionInfoCommand(userID, channelID, args[1])
 	} else if args[0] == "new" {
 		// Handle new session creation with optional path
 		var workingDir string
@@ -1671,6 +1677,43 @@ func (s *Service) handleSessionListCommand(userID, channelID string) (string, er
 	response += "• `/session new <path>` - Create new session for path"
 
 	return response, nil
+}
+
+// handleSessionInfoCommand shows child conversations for a parent session
+func (s *Service) handleSessionInfoCommand(userID, channelID, parentSessionID string) string {
+	// First, get the parent session from the database by session ID
+	session, err := s.sessionManager.GetSessionBySessionID(parentSessionID)
+	if err != nil {
+		errCtx := logging.CreateErrorContext(channelID, userID, "session_info", "get_parent_session")
+		return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to get parent session")
+	}
+	
+	if session == nil {
+		return "❌ **Parent session ID does not exist**"
+	}
+	
+	// Get the conversation tree (all child sessions)
+	children, err := s.sessionManager.GetConversationTree(parentSessionID)
+	if err != nil {
+		errCtx := logging.CreateErrorContext(channelID, userID, "session_info", "get_conversation_tree")
+		return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to get conversation tree")
+	}
+	
+	// Build response
+	response := fmt.Sprintf("📋 **Session Info for: `%s`**\n\n", parentSessionID)
+	
+	if len(children) == 0 {
+		response += "**Child Conversations:** None (new session with no conversations yet)"
+	} else {
+		response += fmt.Sprintf("**Child Conversations (%d total):**\n", len(children))
+		for _, child := range children {
+			response += fmt.Sprintf("• `%s` - Created: %s\n", 
+				child.SessionID,
+				child.CreatedAt.Format("Jan 2 15:04"))
+		}
+	}
+	
+	return response
 }
 
 func (s *Service) handlePermissionSlashCommand(userID, channelID, text string) string {

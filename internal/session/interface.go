@@ -5,6 +5,7 @@ import (
 
 	"github.com/ghabxph/claude-on-slack/internal/config"
 	"github.com/ghabxph/claude-on-slack/internal/claude"
+	"github.com/ghabxph/claude-on-slack/internal/repository"
 )
 
 // SessionManager interface defines the contract for session management
@@ -44,6 +45,10 @@ type SessionManager interface {
 	ListAllSessions(limit int) ([]SessionInfo, error)
 	GetKnownPaths(limit int) ([]string, error)
 	GetSessionsByPath(path string, limit int) ([]SessionInfo, error)
+	
+	// Session info and conversation tree access
+	GetSessionBySessionID(sessionID string) (*repository.Session, error)
+	GetConversationTree(sessionID string) ([]*repository.ChildSession, error)
 
 	// Lifecycle
 	Stop()

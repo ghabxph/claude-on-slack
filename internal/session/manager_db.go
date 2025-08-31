@@ -667,6 +667,26 @@ func (m *DatabaseManager) GetLatestChildSessionID(sessionID string) (*string, er
 	return &leafChild.SessionID, nil
 }
 
+// GetSessionBySessionID retrieves a session by its session ID for /session info command
+func (m *DatabaseManager) GetSessionBySessionID(sessionID string) (*repository.Session, error) {
+	return m.repository.GetSessionBySessionID(sessionID)
+}
+
+// GetConversationTree gets all child sessions for a parent session for /session info command
+func (m *DatabaseManager) GetConversationTree(sessionID string) ([]*repository.ChildSession, error) {
+	// First get the parent session to get its database ID
+	session, err := m.repository.GetSessionBySessionID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, fmt.Errorf("session not found")
+	}
+	
+	// Get conversation tree using the database ID
+	return m.repository.GetConversationTree(session.ID)
+}
+
 // Stop cleanup resources (no background routines in database mode)
 func (m *DatabaseManager) Stop() {
 	m.logger.Info("Database session manager stopped")

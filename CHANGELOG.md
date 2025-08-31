@@ -2,6 +2,36 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.6.0] - 2025-08-31
+
+### Added - Conversation Summarization Feature
+- **New `/summarize` Slash Command**: Generate detailed AI summaries of current conversation sessions
+- **Async Processing**: Prevents Slack timeout errors with immediate response and background processing
+- **Context Compression**: Specialized system prompt optimized for detailed technical summaries and task continuity  
+- **Disposable Sessions**: Uses Claude Code CLI with temporary session IDs to avoid affecting main conversations
+- **Smart Conversation Formatting**: Chronological timestamp-based conversation reconstruction for accurate summarization
+
+### Enhanced - User Experience
+- **Immediate Feedback**: Returns "Summarizing [session-id]... Please wait." instantly to prevent timeouts
+- **Follow-up Delivery**: Sends complete summary as separate message when processing completes
+- **Error Handling**: Private error messages using existing dual logger system (console + ephemeral Slack messages)
+- **Session Context**: Displays session UUID and conversation count in summary headers
+- **Slack Formatting**: Converts markdown formatting to Slack-compatible display format
+
+### Technical - Implementation Details
+- **Background Goroutines**: Async processing pattern using `go performAsyncSummarization()`
+- **Direct Claude Integration**: New `ExecuteClaudeSummary()` method with specialized prompting
+- **Message Pipeline**: Uses stdin for conversation text to avoid command-line escaping issues
+- **Proper UUID Generation**: Uses `uuid.New().String()` for disposable session IDs instead of timestamp-based IDs
+- **Debug Logging**: Comprehensive logging for conversation input, raw responses, and formatted output
+- **PostMessage API**: Direct Slack API calls for follow-up message delivery
+
+### Fixed - Claude Code CLI Integration
+- **Flag Correction**: Changed `--working-dir` to `--add-dir` for proper directory access
+- **System Prompt Separation**: Uses `--append-system-prompt` flag instead of inline prompting
+- **Input Method**: Switched to stdin piping for message content to avoid shell escaping issues
+- **Error Capture**: Proper stdout/stderr separation for better error reporting and debugging
+
 ## [2.5.6] - 2025-08-31
 
 ### Fixed - Session Path Switching Bug

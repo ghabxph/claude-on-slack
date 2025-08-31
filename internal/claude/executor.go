@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ghabxph/claude-on-slack/internal/config"
@@ -529,4 +530,108 @@ func (e *Executor) CleanupWorkspace(workspaceDir string) error {
 
 	e.logger.Info("Cleaned up workspace", zap.String("workspace", workspaceDir))
 	return nil
+}
+
+// ExecuteClaudeSummary executes Claude Code CLI for conversation summarization
+// This is a "disposable" call that doesn't require session management
+func (e *Executor) ExecuteClaudeSummary(ctx context.Context, conversationText string) (string, error) {
+	// Create specialized system prompt for detailed summarization
+	systemPrompt := `You are a conversation summarization specialist. Create a detailed, comprehensive summary of this technical conversation between a user and AI assistant. 
+
+Your summary should be optimized for context compression while preserving maximum detail for task continuity. Focus on:
+
+**1. Primary Goals & Tasks**: What the user was trying to accomplish, including specific objectives and requirements
+**2. Technical Context**: Code changes, files modified, technologies involved, architectural decisions, and system interactions  
+**3. Problem-Solving Journey**: Issues encountered, debugging steps taken, solutions implemented, and approaches tried
+**4. Key Decisions**: Important choices made, reasoning behind them, trade-offs considered, and alternative approaches discussed
+**5. Current State**: Where the conversation left off, what was completed, what's in progress, and system state
+**6. Next Steps**: Logical follow-up actions, pending tasks, known blockers, and recommended approaches
+
+**Critical Requirements:**
+- Be extremely detailed - this summary will be used to continue work seamlessly in a new conversation
+- Include specific technical details: file paths, function names, error messages, configuration changes
+- Preserve context about what worked, what didn't work, and why
+- Include relevant code snippets, commands, and configurations mentioned
+- Note any important discoveries, insights, or lessons learned
+- Use clear, structured formatting for easy parsing
+
+The summary should be comprehensive enough that someone could read it and immediately understand the full context to continue the technical work without missing any important details.`
+
+	// Prepare Claude Code CLI arguments for disposable summarization
+	args := []string{
+		"--print",
+		"--output-format", "json",
+		"--model", "sonnet",
+		"--session-id", uuid.New().String(), // Disposable session ID
+	}
+
+	// Add working directory (use current bot working directory)
+	if e.config.WorkingDirectory != "" {
+		args = append(args, "--add-dir", e.config.WorkingDirectory)
+	}
+
+	// Add system prompt as a separate argument
+	args = append(args, "--append-system-prompt", systemPrompt)
+
+	// Prepare the user message (conversation to summarize)
+	userMessage := fmt.Sprintf("**CONVERSATION TO SUMMARIZE:**\n\n%s", conversationText)
+
+	// Execute Claude Code CLI
+	cmd := exec.CommandContext(ctx, e.claudeCodePath, args...)
+	cmd.Dir = e.config.WorkingDirectory
+
+	// Set up stdin with user message (to avoid command line escaping issues)
+	cmd.Stdin = strings.NewReader(userMessage)
+
+	// Capture stdout and stderr
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	e.logger.Info("Executing Claude summarization",
+		zap.String("claude_path", e.claudeCodePath),
+		zap.String("working_dir", e.config.WorkingDirectory),
+		zap.Int("conversation_length", len(conversationText)))
+
+	start := time.Now()
+	err := cmd.Run()
+	duration := time.Since(start)
+
+	if err != nil {
+		e.logger.Error("Claude summarization failed",
+			zap.Error(err),
+			zap.String("stderr", stderr.String()),
+			zap.Duration("duration", duration))
+
+		return "", fmt.Errorf("claude summarization failed after %v: %v\nStderr: %s", 
+			duration.Truncate(time.Millisecond), err, stderr.String())
+	}
+
+	output := stdout.Bytes()
+
+	// Parse Claude response 
+	var response ClaudeCodeResponse
+	if err := json.Unmarshal(output, &response); err != nil {
+		e.logger.Error("Failed to parse Claude summarization response",
+			zap.Error(err),
+			zap.String("raw_output", string(output)))
+		return "", fmt.Errorf("failed to parse Claude response: %w", err)
+	}
+
+	// Check for Claude-level errors
+	if response.IsError {
+		e.logger.Error("Claude returned an error during summarization",
+			zap.String("error", response.Error),
+			zap.String("result", response.Result))
+		return "", fmt.Errorf("claude summarization error: %s", response.Error)
+	}
+
+	e.logger.Info("Claude summarization completed",
+		zap.Duration("duration", duration),
+		zap.Float64("cost_usd", response.TotalCostUSD),
+		zap.Int("input_tokens", response.Usage.InputTokens),
+		zap.Int("output_tokens", response.Usage.OutputTokens),
+		zap.Int("summary_length", len(response.Result)))
+
+	return response.Result, nil
 }

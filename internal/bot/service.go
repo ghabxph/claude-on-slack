@@ -28,6 +28,7 @@ import (
 	"github.com/ghabxph/claude-on-slack/internal/files"
 	"github.com/ghabxph/claude-on-slack/internal/logging"
 	"github.com/ghabxph/claude-on-slack/internal/notifications"
+	"github.com/ghabxph/claude-on-slack/internal/repository"
 	"github.com/ghabxph/claude-on-slack/internal/session"
 	"github.com/ghabxph/claude-on-slack/internal/version"
 )
@@ -1339,6 +1340,8 @@ func (s *Service) handleSlashCommands(w http.ResponseWriter, r *http.Request) {
 		response = s.handleSessionSlashCommand(userID, channelID, text)
 	case "/permission":
 		response = s.handlePermissionSlashCommand(userID, channelID, text)
+	case "/summarize":
+		response = s.handleSummarizeSlashCommand(userID, channelID)
 	case "/debug":
 		response = s.handleDebugSlashCommand(userID, channelID)
 	case "/stop":
@@ -1806,6 +1809,174 @@ func (s *Service) getPermissionModeForChannel(channelID string, fallbackSessionI
 	}
 	// Fallback to session-based permissions
 	return s.sessionManager.GetPermissionMode(fallbackSessionID)
+}
+
+// handleSummarizeSlashCommand handles the /summarize slash command
+func (s *Service) handleSummarizeSlashCommand(userID, channelID string) string {
+	// Get current active session for the channel
+	userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
+	if err != nil {
+		errCtx := logging.CreateErrorContext(channelID, userID, "summarize_slash_command", "get_session")
+		return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to get current session")
+	}
+
+	// Get conversation tree (all child sessions for current parent session)
+	parentSessionID := userSession.GetID()
+	children, err := s.sessionManager.GetConversationTree(parentSessionID)
+	if err != nil {
+		errCtx := logging.CreateErrorContext(channelID, userID, "summarize_slash_command", "get_conversation_tree")
+		return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to get conversation tree")
+	}
+
+	// Check if there are any conversations to summarize
+	if len(children) == 0 {
+		return "📝 **No Conversations Yet**\n\nThere are no conversations in this session to summarize. Start a conversation first, then use `/summarize` to get a detailed summary."
+	}
+
+	// Launch async summarization in background goroutine
+	go s.performAsyncSummarization(userID, channelID, parentSessionID, children)
+
+	// Return immediate response with parent UUID
+	return fmt.Sprintf("📝 Summarizing `%s`... Please wait.", parentSessionID)
+}
+
+// performAsyncSummarization performs the actual summarization work in background
+func (s *Service) performAsyncSummarization(userID, channelID, parentSessionID string, children []*repository.ChildSession) {
+	// Format conversation for summarization
+	conversationText, err := s.formatConversationForSummary(parentSessionID, children)
+	if err != nil {
+		errCtx := logging.CreateErrorContext(channelID, userID, "async_summarization", "format_conversation")
+		s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to format conversation for summarization")
+		return
+	}
+
+	// Debug logging for conversation input
+	s.logger.Info("Formatted conversation for Claude",
+		zap.String("parent_session_id", parentSessionID),
+		zap.Int("conversation_length", len(conversationText)),
+		zap.String("conversation_preview", func() string {
+			if len(conversationText) > 300 {
+				return conversationText[:300] + "..."
+			}
+			return conversationText
+		}()))
+
+	// Call Claude for summarization
+	summary, err := s.claudeExecutor.ExecuteClaudeSummary(context.Background(), conversationText)
+	if err != nil {
+		errCtx := logging.CreateErrorContext(channelID, userID, "async_summarization", "claude_summarization")
+		s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to generate summary")
+		return
+	}
+
+	// Debug logging for summary content
+	s.logger.Info("Claude summarization raw response",
+		zap.String("parent_session_id", parentSessionID),
+		zap.Int("raw_summary_length", len(summary)),
+		zap.String("raw_summary_preview", func() string {
+			if len(summary) > 200 {
+				return summary[:200] + "..."
+			}
+			return summary
+		}()))
+
+	// Format response for Slack
+	formattedSummary := s.formatSummaryForSlack(summary)
+	s.logger.Info("Formatted summary for Slack",
+		zap.String("parent_session_id", parentSessionID),
+		zap.Int("formatted_summary_length", len(formattedSummary)),
+		zap.String("formatted_summary_preview", func() string {
+			if len(formattedSummary) > 200 {
+				return formattedSummary[:200] + "..."
+			}
+			return formattedSummary
+		}()))
+
+	response := fmt.Sprintf("📋 **Conversation Summary**\n\n*Session:* `%s`\n*Messages:* %d conversations\n\n**Summary:**\n\n%s", 
+		parentSessionID, len(children), formattedSummary)
+
+	// Send follow-up message to channel
+	_, _, err = s.slackAPI.PostMessage(channelID, slack.MsgOptionText(response, false))
+	if err != nil {
+		errCtx := logging.CreateErrorContext(channelID, userID, "async_summarization", "post_message")
+		s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to post summary message to channel")
+		return
+	}
+
+	s.logger.Info("Async summarization completed successfully",
+		zap.String("channel_id", channelID),
+		zap.String("user_id", userID),
+		zap.String("parent_session_id", parentSessionID),
+		zap.Int("conversation_count", len(children)),
+		zap.Int("summary_length", len(response)))
+}
+
+// formatConversationForSummary formats the conversation history for Claude summarization
+func (s *Service) formatConversationForSummary(parentSessionID string, children []*repository.ChildSession) (string, error) {
+	// Get parent session to get the initial user prompt
+	parentSession, err := s.sessionManager.GetSessionBySessionID(parentSessionID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get parent session: %w", err)
+	}
+
+	var conversation strings.Builder
+
+	// Start with parent session user prompt (if exists)
+	if parentSession.UserPrompt != nil {
+		timestamp := parentSession.CreatedAt.Format("Jan 2, 3:04 PM")
+		conversation.WriteString(fmt.Sprintf("%s User: %s\n", timestamp, *parentSession.UserPrompt))
+	}
+
+	// Add all child sessions in order
+	for _, child := range children {
+		timestamp := child.CreatedAt.Format("Jan 2, 3:04 PM")
+		
+		// Add AI response (if exists)
+		if child.AIResponse != nil {
+			conversation.WriteString(fmt.Sprintf("%s AI: %s\n", timestamp, *child.AIResponse))
+		}
+
+		// Add user prompt from this child (if exists) 
+		if child.UserPrompt != nil {
+			conversation.WriteString(fmt.Sprintf("%s User: %s\n", timestamp, *child.UserPrompt))
+		}
+	}
+
+	return conversation.String(), nil
+}
+
+// formatSummaryForSlack formats the Claude summary for Slack display
+func (s *Service) formatSummaryForSlack(summary string) string {
+	// Convert markdown-style formatting to Slack formatting
+	// Replace **bold** with *bold*
+	formatted := strings.ReplaceAll(summary, "**", "*")
+	
+	// Ensure proper line breaks for Slack
+	lines := strings.Split(formatted, "\n")
+	var result strings.Builder
+	
+	for i, line := range lines {
+		// Trim whitespace
+		line = strings.TrimSpace(line)
+		
+		// Skip empty lines at the beginning
+		if line == "" && result.Len() == 0 {
+			continue
+		}
+		
+		// Add line to result
+		if result.Len() > 0 {
+			result.WriteString("\n")
+		}
+		result.WriteString(line)
+		
+		// Add extra line break after sections (lines ending with :)
+		if strings.HasSuffix(line, ":") && i < len(lines)-1 && lines[i+1] != "" {
+			result.WriteString("\n")
+		}
+	}
+	
+	return result.String()
 }
 
 // logErrorWithTrace logs an error using the dual logger and returns a user-friendly message

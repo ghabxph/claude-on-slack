@@ -2,6 +2,31 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.3.0] - 2025-08-30
+
+### Fixed - Database Schema Redesign  
+- **Critical Fix**: Corrected fatal database schema error where `previous_session_id` was integer instead of varchar UUID
+- **Schema Migration**: Updated migration 001 to use `VARCHAR(255)` for proper UUID chain storage
+- **Repository Update**: Fixed `ChildSession.PreviousSessionID` type from `*int` to `*string`
+- **Chain Logic**: Previous session ID now stores UUIDs enabling proper conversation reconstruction
+
+### Enhanced - Session Design Implementation
+- **Message Counting**: Simplified formula to `child_count` instead of `(child_count * 2) + 1` 
+- **Root Session**: Properly implemented as blank state with `UserPrompt = NULL`
+- **Conversation Chain**: Each child session represents one exchange linked via UUID chain
+- **Future Ready**: Design supports conversation reconstruction and compression features
+
+### Technical - Conversation Flow
+- **Root Session**: Created blank, gets `UserPrompt` when user sends message
+- **Child Creation**: Claude response creates child session with `AIResponse`, clears `UserPrompt`  
+- **Chain Building**: `PreviousSessionID` links to previous session's UUID (root or child)
+- **Traceability**: All sessions linked via `RootParentID` for complete conversation trees
+
+### Database Impact
+- **Breaking Change**: Requires database cleanup and recreation with new schema
+- **UUID Storage**: `previous_session_id` column now stores session UUIDs instead of database IDs
+- **Chain Structure**: Enables traversal: Root → Child1 → Child2 → Child3 via UUID references
+
 ## [2.2.12] - 2025-08-30
 
 ### Fixed - Session Continuity Issues

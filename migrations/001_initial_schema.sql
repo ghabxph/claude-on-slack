@@ -16,7 +16,7 @@ CREATE TABLE sessions (
 CREATE TABLE child_sessions (
     id SERIAL PRIMARY KEY,
     session_id VARCHAR(255) NOT NULL,
-    previous_session_id INTEGER REFERENCES child_sessions(id),
+    previous_session_id VARCHAR(255),
     root_parent_id INTEGER REFERENCES sessions(id) NOT NULL,
     ai_response TEXT,
     user_prompt TEXT,

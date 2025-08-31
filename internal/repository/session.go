@@ -23,7 +23,7 @@ type Session struct {
 type ChildSession struct {
 	ID                int       `db:"id"`
 	SessionID         string    `db:"session_id"`
-	PreviousSessionID *int      `db:"previous_session_id"`
+	PreviousSessionID *string   `db:"previous_session_id"`
 	RootParentID      int       `db:"root_parent_id"`
 	AIResponse        *string   `db:"ai_response"`
 	UserPrompt        *string   `db:"user_prompt"`
@@ -323,10 +323,9 @@ func (r *SessionRepository) GetSessionsByWorkingDirectory(workingDir string, lim
 
 	return sessions, nil
 }
-// CountMessagesInConversationTree counts total messages (both user and AI) in the conversation tree
+// CountMessagesInConversationTree counts total exchanges in the conversation tree
 func (r *SessionRepository) CountMessagesInConversationTree(rootParentID int) (int, error) {
-	// Count child sessions (each child session represents a user-AI exchange)
-	// Each child session has both user prompt and AI response, so it counts as 2 messages
+	// Count child sessions (each child session represents one exchange in the conversation)
 	query := `SELECT COUNT(*) FROM child_sessions WHERE root_parent_id = $1`
 	
 	var childCount int
@@ -335,16 +334,16 @@ func (r *SessionRepository) CountMessagesInConversationTree(rootParentID int) (i
 		return 0, fmt.Errorf("failed to count child sessions: %w", err)
 	}
 	
-	// Each child session represents a user-AI exchange (2 messages)
-	// Plus the initial user prompt from the root session (1 message)
-	totalMessages := (childCount * 2) + 1
+	// Each child session represents one exchange in the conversation chain
+	// Root session is blank state, so total exchanges = child count
+	totalExchanges := childCount
 	
-	r.logger.Debug("Counted messages in conversation tree",
+	r.logger.Debug("Counted exchanges in conversation tree",
 		zap.Int("root_parent_id", rootParentID),
 		zap.Int("child_sessions", childCount),
-		zap.Int("total_messages", totalMessages))
+		zap.Int("total_exchanges", totalExchanges))
 	
-	return totalMessages, nil
+	return totalExchanges, nil
 }
 
 // DeleteSession deletes a session and all its associated child sessions

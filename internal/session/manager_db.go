@@ -240,9 +240,12 @@ func (m *DatabaseManager) ProcessAIResponse(sessionID string, aiResponse string)
 		return fmt.Errorf("failed to find leaf child: %w", err)
 	}
 
-	var previousSessionID *int
+	var previousSessionID *string
 	if leafChild != nil {
-		previousSessionID = &leafChild.ID
+		previousSessionID = &leafChild.SessionID
+	} else {
+		// First child session - previous is the root session ID
+		previousSessionID = &session.SessionID
 	}
 
 	// Create new child session
@@ -560,9 +563,12 @@ func (m *DatabaseManager) ProcessClaudeAIResponse(sessionID string, claudeSessio
 		return fmt.Errorf("failed to find leaf child: %w", err)
 	}
 
-	var previousSessionID *int
+	var previousSessionID *string
 	if leafChild != nil {
-		previousSessionID = &leafChild.ID
+		previousSessionID = &leafChild.SessionID
+	} else {
+		// First child session - previous is the root session ID
+		previousSessionID = &session.SessionID
 	}
 
 	// Create new child session with Claude's session ID

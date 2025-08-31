@@ -126,11 +126,41 @@ if [ -d "migrations" ]; then
         fi
     done
     echo "All migrations completed"
+    
+    # Wait for database to be ready again after migrations
+    echo "Verifying database readiness after migrations..."
+    for i in {1..15}; do
+        if $DOCKER_COMPOSE exec -T postgres pg_isready -U ${DB_USER:-claude_bot} -d ${DB_NAME:-claude_slack} >/dev/null 2>&1; then
+            echo "Database confirmed ready after migrations!"
+            break
+        fi
+        if [ $i -eq 15 ]; then
+            echo "Database not ready after migrations - waiting 5 more seconds"
+            sleep 5
+        fi
+        sleep 2
+    done
 else
     echo "No migrations directory found"
 fi
 
-# 4. Start services back up
+# 6. Final database connection test before starting services
+echo "Final database connection test..."
+for i in {1..10}; do
+    if $DOCKER_COMPOSE exec -T postgres psql -U ${DB_USER:-claude_bot} -d ${DB_NAME:-claude_slack} -c "SELECT 1;" >/dev/null 2>&1; then
+        echo "Database connection test successful!"
+        break
+    fi
+    if [ $i -eq 10 ]; then
+        echo "❌ Database connection test failed after 10 attempts"
+        echo "Check PostgreSQL logs: docker compose logs postgres"
+        exit 1
+    fi
+    echo "Database connection attempt $i/10 failed, retrying..."
+    sleep 3
+done
+
+# 7. Start services back up
 echo "Starting claude-on-slack services..."
 sudo systemctl start claude-on-slack.service
 

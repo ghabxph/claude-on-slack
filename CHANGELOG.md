@@ -2,6 +2,13 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.6.3] - 2025-08-31
+
+### Enhanced - Markdown Heading Prevention
+- **No Markdown Headings**: Added explicit instruction to never use markdown headings (## text) in Slack responses
+- **Bold Headings Only**: Enforces use of *bold text:* format instead of markdown headings for better Slack rendering
+- **Improved Readability**: Ensures all section headers display properly in Slack interface
+
 ## [2.6.2] - 2025-08-31
 
 ### Enhanced - Slack Formatting & User Experience  

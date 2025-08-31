@@ -157,6 +157,7 @@ Remember: You have full access to the machine's capabilities, but always priorit
 - Use Slack code blocks with triple backticks for multi-line code
 - Use bullet points with • or - for lists
 - Use appropriate emojis for visual clarity
+- *Never use markdown headings (## text)* - use *bold text:* instead
 - Only use markdown formatting if explicitly requested by the user`
 	args = append(args, "--append-system-prompt", systemPrompt)
 	

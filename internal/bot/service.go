@@ -1052,7 +1052,7 @@ func (s *Service) handleSetSessionCommand(ctx context.Context, event *slackevent
 					break
 				}
 				response += fmt.Sprintf("• `%s` - Last used: %s\n", 
-					session.GetID()[:8], 
+					session.GetID(), 
 					session.GetLastActivity().Format("Jan 2 15:04"))
 			}
 			
@@ -1513,7 +1513,7 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 					break
 				}
 				response += fmt.Sprintf("• `%s` - Last used: %s\n", 
-					session.GetID()[:8], 
+					session.GetID(), 
 					session.GetLastActivity().Format("Jan 2 15:04"))
 			}
 			
@@ -1656,9 +1656,6 @@ func (s *Service) handleSessionListCommand(userID, channelID string) (string, er
 			}
 			
 			sessionID := session.GetID()
-			if len(sessionID) > 8 {
-				sessionID = sessionID[:8]
-			}
 			
 			response += fmt.Sprintf("  • `%s` - Last used: %s\n", 
 				sessionID,

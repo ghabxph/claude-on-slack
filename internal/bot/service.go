@@ -1424,9 +1424,33 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 		if err != nil {
 			messageCount = 0
 		}
+
+		// Get channel state to determine parent and leaf sessions
+		parentSessionInfo := "None"
+		leafSessionInfo := "None"
 		
-		response := fmt.Sprintf("📋 **Session Management Help**\n\n**Current Session:**\n• Claude Session ID: `%s`\n• Bot Session ID: `%s`\n• Messages: %d\n\n**Usage:**\n• `/session` - Show this help\n• `/session list` - Show detailed list of all sessions\n• `/session info <uuid>` - Show child conversations for parent session\n• `/session <claude-session-id>` - Switch to specific Claude session\n• `/session new <path>` - Start new conversation in specific path\n• `/session new` - Start new conversation in current directory\n• `/session . <path>` - Switch to or create session for specific path",
-			currentSessionID, userSession.GetID(), messageCount)
+		// Access the database manager to get channel state
+		if dbManager, ok := s.sessionManager.(*session.DatabaseManager); ok {
+			channelState, err := dbManager.GetChannelState(channelID)
+			if err == nil && channelState != nil {
+				// Get parent session info
+				if channelState.ActiveSessionID != nil {
+					if parentSession, err := dbManager.LoadSessionByID(*channelState.ActiveSessionID); err == nil && parentSession != nil {
+						parentSessionInfo = fmt.Sprintf("`%s`", parentSession.SessionID)
+					}
+				}
+				
+				// Get leaf session info  
+				if channelState.ActiveChildSessionID != nil {
+					if leafSession, err := dbManager.GetChildSessionByID(*channelState.ActiveChildSessionID); err == nil && leafSession != nil {
+						leafSessionInfo = fmt.Sprintf("`%s`", leafSession.SessionID)
+					}
+				}
+			}
+		}
+		
+		response := fmt.Sprintf("📋 **Session Management Help**\n\n**Current Session:**\n• Parent Session: %s\n• Leaf Session: %s\n• Messages: %d\n\n**Usage:**\n• `/session` - Show this help\n• `/session list` - Show detailed list of all sessions\n• `/session info <uuid>` - Show child conversations for parent session\n• `/session <claude-session-id>` - Switch to specific Claude session\n• `/session new <path>` - Start new conversation in specific path\n• `/session new` - Start new conversation in current directory\n• `/session . <path>` - Switch to or create session for specific path",
+			parentSessionInfo, leafSessionInfo, messageCount)
 
 		if len(sessions) > 0 {
 			response += "\n\n**Available Sessions:**\n"

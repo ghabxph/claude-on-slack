@@ -2,7 +2,7 @@
 
 set -e  # Exit on any error
 
-echo "🚀 Starting claude-on-slack redeploy v2.5.1..."
+echo "🚀 Starting claude-on-slack redeploy v2.5.3..."
 
 # Configuration
 SERVICE_NAME="slack-claude-bot"

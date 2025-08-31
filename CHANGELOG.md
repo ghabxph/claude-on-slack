@@ -2,6 +2,19 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.5.3] - 2025-08-31
+
+### Enhanced - Session Display Improvement
+- **Meaningful Session Labels**: Replaced confusing "Claude Session ID" and "Bot Session ID" (which showed identical values) with clear "Parent Session" and "Leaf Session" information
+- **Database-Driven Display**: Session information now retrieved directly from `slack_channels` table using existing parent/leaf session architecture
+- **Smart Data Resolution**: Added methods to convert database foreign key IDs to user-friendly session UUIDs for display
+- **Hierarchical Session Visibility**: Users can now see the actual session hierarchy structure (root conversation vs current active child)
+
+### Technical - Database Access Enhancement
+- **New Repository Method**: Added `GetChildSessionByID()` for retrieving child session information by database ID
+- **Public Session Access**: Added `GetChannelState()`, `GetChildSessionByID()`, and `LoadSessionByID()` methods to DatabaseManager
+- **Type-Safe Conversion**: Proper conversion from database integer foreign keys to session UUID strings for user display
+
 ## [2.5.2] - 2025-08-31
 
 ### Fixed - Session Switching Bug

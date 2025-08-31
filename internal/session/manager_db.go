@@ -439,6 +439,21 @@ func (m *DatabaseManager) SwitchToSessionInChannel(channelID, sessionID string) 
 	return nil
 }
 
+// GetChildSessionByID retrieves a child session by database ID
+func (m *DatabaseManager) GetChildSessionByID(id int) (*repository.ChildSession, error) {
+	return m.repository.GetChildSessionByID(id)
+}
+
+// GetChannelState retrieves the channel state for display purposes
+func (m *DatabaseManager) GetChannelState(channelID string) (*repository.SlackChannel, error) {
+	return m.repository.GetChannelState(channelID)
+}
+
+// LoadSessionByID loads session by database ID (public version)
+func (m *DatabaseManager) LoadSessionByID(id int) (*repository.Session, error) {
+	return m.loadSessionByID(id)
+}
+
 // DbSessionInfo wraps repository.Session to implement SessionInfo interface
 type DbSessionInfo struct {
 	*repository.Session

@@ -3,7 +3,7 @@ package version
 import "time"
 
 const (
-	Version   = "2.5.2"
+	Version   = "2.5.3"
 	BuildTime = "development"  // Set during build
 	GitHash   = ""             // Set during build
 )

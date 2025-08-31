@@ -440,3 +440,22 @@ func (r *SessionRepository) DeleteSession(sessionID string) error {
 
 	return nil
 }
+
+// GetChildSessionByID retrieves a child session by its database ID
+func (r *SessionRepository) GetChildSessionByID(id int) (*ChildSession, error) {
+	query := `SELECT id, session_id, previous_session_id, root_parent_id, ai_response, user_prompt, summary, created_at, updated_at FROM child_sessions WHERE id = $1`
+	
+	child := &ChildSession{}
+	err := r.db.GetDB().QueryRow(query, id).Scan(
+		&child.ID, &child.SessionID, &child.PreviousSessionID, &child.RootParentID,
+		&child.AIResponse, &child.UserPrompt, &child.Summary, &child.CreatedAt, &child.UpdatedAt)
+		
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // Child session not found
+		}
+		return nil, fmt.Errorf("failed to get child session by ID: %w", err)
+	}
+	
+	return child, nil
+}

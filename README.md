@@ -255,11 +255,9 @@ ALLOWED_TOOLS=                    # Empty = all tools (full access)
 ALLOWED_USERS=user1@domain.com,user2@domain.com
 ADMIN_USERS=admin@domain.com
 
-# Auto-response channels (optional)
-AUTO_RESPONSE_CHANNELS=C1234567890  # Channel ID where bot responds to ALL messages
-
-# Deployment notification channels (optional)
-DEPLOYMENT_NOTIFY_CHANNELS=C1234567890,C0987654321  # Comma-separated channel IDs for deployment notifications
+# Bot responds to ALL messages in allowed channels (no mention needed)
+# Deployment notifications are automatically sent to all allowed channels
+ALLOWED_CHANNELS=C1234567890,C0987654321  # Channel IDs where bot is allowed to operate
 
 # Server settings (for SSH tunnel setup)
 SERVER_HOST=0.0.0.0

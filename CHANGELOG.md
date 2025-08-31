@@ -2,6 +2,43 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.5.5] - 2025-08-31
+
+### Simplified - Deployment Notification System
+- **Removed DEPLOYMENT_NOTIFY_CHANNELS**: Eliminated redundant environment variable for cleaner configuration
+- **Unified Notification System**: Deployment notifications now sent to ALL allowed channels automatically
+- **Health Check Enhancement**: Deployment notifications serve as connectivity health check for all allowed channels
+- **Better Visibility**: All allowed channels receive deployment notifications for improved monitoring
+
+### Enhanced - Channel Management
+- **Consistent Behavior**: All allowed channels treated equally for notifications
+- **Simplified Configuration**: One less environment variable to manage
+- **Operational Visibility**: Deployment notifications confirm bot can interact with all configured channels
+
+### Technical - Code Cleanup
+- **Removed Environment Parsing**: Eliminated `os.Getenv("DEPLOYMENT_NOTIFY_CHANNELS")` logic
+- **Simplified Notification Logic**: Direct usage of `AllowedChannels` instead of complex fallback system
+- **Unused Import Cleanup**: Removed unused `os` import from bot service
+
+## [2.5.4] - 2025-08-31
+
+### Simplified - Configuration Cleanup  
+- **Removed AUTO_RESPONSE_CHANNELS**: Eliminated redundant environment variable for cleaner configuration
+- **Unified Bot Behavior**: Bot now responds to ALL messages in ALLOWED_CHANNELS (no mention needed)
+- **Simplified Logic**: Removed dual response mode complexity - consistent behavior across all allowed channels
+- **Configuration Reduction**: One less environment variable to configure and manage
+
+### Enhanced - User Experience
+- **Consistent Behavior**: Bot works the same way in all allowed channels - no more confusion about mention vs auto-response modes
+- **Predictable Operation**: If you're in an allowed channel, bot responds to all messages
+- **Simplified Setup**: Only need to configure ALLOWED_CHANNELS instead of both ALLOWED_CHANNELS and AUTO_RESPONSE_CHANNELS
+
+### Technical - Code Simplification
+- **Removed Config Field**: Eliminated `AutoResponseChannels []string` from config struct
+- **Removed Method**: Removed `IsAutoResponseChannel()` configuration method
+- **Simplified Message Processing**: Streamlined message handling logic by removing dual response mode checks
+- **Updated Fallback Logic**: Startup notifications now fallback to `AllowedChannels` instead of `AutoResponseChannels`
+
 ## [2.5.3] - 2025-08-31
 
 ### Enhanced - Session Display Improvement

@@ -201,10 +201,6 @@ COMMAND_PREFIX=!claude
 ALLOWED_USERS=
 ADMIN_USERS=
 
-# Auto-Response Channels (bot responds to ALL messages, no mention needed)
-# Get channel IDs from Slack: right-click channel → Copy link → ID is at the end
-AUTO_RESPONSE_CHANNELS=
-
 # Security & Rate Limiting
 ENABLE_AUTH=true
 RATE_LIMIT_PER_MINUTE=20

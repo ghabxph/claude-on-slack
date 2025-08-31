@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -298,17 +297,7 @@ func (s *Service) handleMessageEvent(event *slackevents.MessageEvent) {
 		return
 	}
 
-	// Check if message starts with command prefix or mentions the bot
-	text := strings.TrimSpace(event.Text)
-	isMentioned := strings.HasPrefix(text, s.config.CommandPrefix) || strings.Contains(text, fmt.Sprintf("<@%s>", s.botUserID))
-	isAutoResponseChannel := s.config.IsAutoResponseChannel(event.Channel)
-
-	// Respond if bot is mentioned OR if it's an auto-response channel
-	if !isMentioned && !isAutoResponseChannel {
-		return
-	}
-
-	s.logger.Debug("Processing message",
+	s.logger.Debug("Processing message in allowed channel",
 		zap.String("user_id", event.User),
 		zap.String("channel_id", event.Channel),
 		zap.String("text", event.Text))
@@ -1614,25 +1603,13 @@ func (s *Service) handleStopCommand(ctx context.Context, event *slackevents.Mess
 	return "✅ Processing stopped.", nil
 }
 
-// sendStartupNotification sends a notification to configured channels when the bot starts up
+// sendStartupNotification sends a notification to all allowed channels when the bot starts up
 func (s *Service) sendStartupNotification() {
-	// Check for deployment notification channels from environment
-	var notifyChannels []string
-	if deployChannels := os.Getenv("DEPLOYMENT_NOTIFY_CHANNELS"); deployChannels != "" {
-		notifyChannels = strings.Split(deployChannels, ",")
-		// Trim whitespace from channel IDs
-		for i, ch := range notifyChannels {
-			notifyChannels[i] = strings.TrimSpace(ch)
-		}
-	}
-	
-	// Fallback to auto-response channels if no deployment channels configured
-	if len(notifyChannels) == 0 && len(s.config.AutoResponseChannels) > 0 {
-		notifyChannels = s.config.AutoResponseChannels
-	}
+	// Use all allowed channels for deployment notifications
+	notifyChannels := s.config.AllowedChannels
 	
 	if len(notifyChannels) == 0 {
-		s.logger.Info("No notification channels configured, skipping startup notification")
+		s.logger.Info("No allowed channels configured, skipping startup notification")
 		return
 	}
 

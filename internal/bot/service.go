@@ -1533,7 +1533,24 @@ func (s *Service) handleSessionSlashCommand(userID, channelID, text string) stri
 		// Switch to specific Claude session ID
 		sessionID := args[0]
 
-		// For database sessions, session switching is handled automatically
+		// Validate that the session exists first
+		session, err := s.sessionManager.GetSessionBySessionID(sessionID)
+		if err != nil {
+			errCtx := logging.CreateErrorContext(channelID, userID, "session_switch", "validate_session")
+			return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to validate session for switching")
+		}
+
+		if session == nil {
+			return fmt.Sprintf("❌ **Session not found**\n\nSession `%s` does not exist.", sessionID)
+		}
+
+		// Perform the actual session switch
+		err = s.sessionManager.SwitchToSessionInChannel(channelID, sessionID)
+		if err != nil {
+			errCtx := logging.CreateErrorContext(channelID, userID, "session_switch", "update_channel")
+			return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to switch session")
+		}
+
 		return fmt.Sprintf("✅ **Session Switched**\n\nNow using Claude session: `%s`\n\nNext message will resume this conversation.", sessionID)
 	}
 }

@@ -2,6 +2,20 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.5.2] - 2025-08-31
+
+### Fixed - Session Switching Bug
+- **Critical Fix**: Fixed completely broken `/session <uuid>` command that only returned fake success messages without actually switching sessions
+- **Database Updates**: Session switching now properly updates both `slack_channels` table and memory cache
+- **Session Validation**: Added proper session existence validation before attempting to switch
+- **Error Handling**: Comprehensive error handling with context logging for session switching operations
+- **Memory Consistency**: Fixed cache synchronization to maintain consistency between database and memory state
+
+### Enhanced - Session Management
+- **Interface Extension**: Added `SwitchToSessionInChannel()` method to SessionManager interface
+- **Database Integration**: Full database-backed session switching with proper transaction handling
+- **Leaf Session Tracking**: Automatic detection and setting of leaf child sessions during switch operations
+
 ## [2.5.1] - 2025-08-31
 
 ### Fixed - Database Query Robustness

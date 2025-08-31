@@ -49,6 +49,9 @@ type SessionManager interface {
 	// Session info and conversation tree access
 	GetSessionBySessionID(sessionID string) (*repository.Session, error)
 	GetConversationTree(sessionID string) ([]*repository.ChildSession, error)
+	
+	// Session switching
+	SwitchToSessionInChannel(channelID, sessionID string) error
 
 	// Lifecycle
 	Stop()

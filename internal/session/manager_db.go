@@ -396,6 +396,49 @@ func (m *DatabaseManager) GetSessionsByPath(path string, limit int) ([]SessionIn
 	return sessionInfos, nil
 }
 
+// SwitchToSessionInChannel switches the active session for a channel
+func (m *DatabaseManager) SwitchToSessionInChannel(channelID, sessionID string) error {
+	// Get the target session to validate it exists
+	session, err := m.getSessionBySessionID(sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get target session: %w", err)
+	}
+	if session == nil {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+
+	// Get the latest child session (leaf) for this session
+	leafChild, err := m.repository.FindLeafChild(session.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get leaf child for session %s: %w", sessionID, err)
+	}
+
+	// Update channel state to switch to this session
+	var activeChildSessionID *int
+	if leafChild != nil {
+		activeChildSessionID = &leafChild.ID
+	}
+
+	err = m.repository.UpdateChannelState(channelID, &session.ID, activeChildSessionID)
+	if err != nil {
+		return fmt.Errorf("failed to update channel state: %w", err)
+	}
+
+	// Update memory cache
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Update session lookup cache
+	m.sessionLookup[session.SessionID] = session
+	
+	// Update conversation tree cache if we have a leaf child
+	if leafChild != nil {
+		m.conversationTrees[session.ID] = []*repository.ChildSession{leafChild}
+	}
+
+	return nil
+}
+
 // DbSessionInfo wraps repository.Session to implement SessionInfo interface
 type DbSessionInfo struct {
 	*repository.Session

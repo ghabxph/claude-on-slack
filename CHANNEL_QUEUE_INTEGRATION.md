@@ -1,5 +1,9 @@
 # Channel-Based Message Queue Integration Plan
 
+> **⚠️ STATUS: EXPERIMENTAL - UNCONFIRMED**  
+> This feature implementation is in development and requires user confirmation before activation.  
+> Foundation components are complete but bot service integration is pending approval.
+
 ## Overview
 
 This document outlines the implementation of channel-based message queuing to replace the current session-based queuing system. The new system provides FIFO (First In, First Out) message processing per Slack channel with intelligent message combining.

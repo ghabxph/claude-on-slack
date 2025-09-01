@@ -2,6 +2,18 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.7.0-beta] - 2025-08-31
+
+### Added - Channel-Based Message Queue (⚠️ EXPERIMENTAL - UNCONFIRMED)
+- **Channel-Scoped Queuing**: Implement FIFO message queuing per Slack channel instead of per session
+- **Database Migration 007**: Add persistent message queue tables (channel_message_queue, channel_processing_state)
+- **ChannelQueueService**: Complete service implementation for queue management and message combining
+- **Sequential Processing**: Prevent concurrent message processing within same channel
+- **Intelligent Combining**: Combine multiple queued messages into single comprehensive request
+- **Foundation Only**: Database schema and core service implemented, bot integration pending
+
+**⚠️ STATUS**: This feature is experimental and requires confirmation before activation. Integration with bot service pending.
+
 ## [2.6.3] - 2025-08-31
 
 ### Enhanced - Markdown Heading Prevention

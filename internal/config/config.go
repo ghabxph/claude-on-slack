@@ -123,7 +123,7 @@ func Load() (*Config, error) {
 			MaxLifetime:     time.Hour,
 		},
 		EnableDatabasePersistence: false,
-		AppVersion:               "2.0.0",
+		AppVersion:               "2.7.0",
 	}
 
 	// Load required environment variables

@@ -1650,7 +1650,7 @@ func (s *Service) sendStartupNotification() {
 			"🔍 Live Tool Updates - Watch Claude read files, run commands, and write code in real-time",
 			"✨ Enhanced Transparency - From simple 'Thinking...' to detailed step-by-step progress",
 			"🔄 Backwards Compatible - Existing behavior unchanged unless feature flag is enabled",
-			"⚙️ Stream-JSON Integration - Seamless parsing of Claude Code CLI streaming output",
+			"🏗️ Version Consolidation - Single source of truth for version in config.AppVersion",
 		}
 
 		if err := notifier.NotifyDeployment(s.config.AppVersion, changes); err != nil {

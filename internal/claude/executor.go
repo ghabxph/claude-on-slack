@@ -894,6 +894,12 @@ func FormatToolCallForSlack(toolCall ToolCall) string {
 	case "Task":
 		return "🤖 _Launching specialized agent..._"
 		
+	case "TodoWrite":
+		if todosInput, ok := toolCall.Input["todos"]; ok {
+			return formatTodoWriteInput(todosInput)
+		}
+		return "📋 _Updating todo list..._"
+		
 	case "ToolResult":
 		// Extract the content for tool result display
 		if content, ok := toolCall.Input["content"].(string); ok {
@@ -1008,6 +1014,88 @@ func looksLikeCode(content string) bool {
 	}
 	
 	return false
+}
+
+// formatTodoWriteInput formats TodoWrite tool input to display the todo list
+func formatTodoWriteInput(todosInput interface{}) string {
+	// Parse the todos array from the input
+	todosArray, ok := todosInput.([]interface{})
+	if !ok {
+		return "📋 _Updating todo list..._"
+	}
+	
+	if len(todosArray) == 0 {
+		return "📋 _Todo list cleared_"
+	}
+	
+	var todoLines []string
+	completedCount := 0
+	inProgressCount := 0
+	pendingCount := 0
+	
+	for _, todoItem := range todosArray {
+		todoMap, ok := todoItem.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		
+		content, hasContent := todoMap["content"].(string)
+		status, hasStatus := todoMap["status"].(string)
+		
+		if !hasContent || !hasStatus {
+			continue
+		}
+		
+		// Format based on status
+		var statusIcon, formattedLine string
+		switch status {
+		case "completed":
+			statusIcon = "✅"
+			formattedLine = fmt.Sprintf("%s ~~%s~~", statusIcon, content)
+			completedCount++
+		case "in_progress":
+			statusIcon = "🔄"
+			formattedLine = fmt.Sprintf("%s **%s**", statusIcon, content)
+			inProgressCount++
+		case "pending":
+			statusIcon = "⏳"
+			formattedLine = fmt.Sprintf("%s %s", statusIcon, content)
+			pendingCount++
+		default:
+			statusIcon = "📌"
+			formattedLine = fmt.Sprintf("%s %s", statusIcon, content)
+			pendingCount++
+		}
+		
+		todoLines = append(todoLines, formattedLine)
+	}
+	
+	if len(todoLines) == 0 {
+		return "📋 _Updating todo list..._"
+	}
+	
+	// Create summary line
+	total := len(todoLines)
+	summaryParts := []string{}
+	if completedCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d completed", completedCount))
+	}
+	if inProgressCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d in progress", inProgressCount))
+	}
+	if pendingCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d pending", pendingCount))
+	}
+	
+	summaryLine := fmt.Sprintf("📋 **Todo List Updated** (%d total: %s)", total, strings.Join(summaryParts, ", "))
+	
+	// Combine summary and todo items
+	result := summaryLine + "\n\n"
+	for _, line := range todoLines {
+		result += line + "\n"
+	}
+	
+	return strings.TrimSpace(result)
 }
 
 // formatFileContent formats file content with syntax highlighting

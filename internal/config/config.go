@@ -340,10 +340,6 @@ func Load() (*Config, error) {
 		cfg.NotificationChannels = strings.Split(val, ",")
 	}
 
-	if val := os.Getenv("APP_VERSION"); val != "" {
-		cfg.AppVersion = val
-	}
-
 	// Load feature flags
 	if val := os.Getenv("FEATURES"); val != "" {
 		cfg.Features = strings.Split(val, ",")

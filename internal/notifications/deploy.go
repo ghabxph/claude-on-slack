@@ -34,17 +34,9 @@ func (n *DeploymentNotifier) FormatDeploymentMessage(version string, changes []s
 	message := fmt.Sprintf("🚀 *Claude Bot Deployment Complete* - v%s\n", version)
 	message += fmt.Sprintf("⏰ Deployed at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 UTC"))
 	
-	if len(changes) > 0 {
-		message += "*Changes in this release:*\n"
-		for _, change := range changes {
-			message += fmt.Sprintf("• %s\n", change)
-		}
-	} else {
-		message += "• 🧠 **Real-Time Thinking Process** - See Claude's tool execution live (opt-in with `FEATURES=THINKING_PROCESS`)\n"
-		message += "• 🔍 **Live Tool Updates** - Watch Claude read files, run commands, and write code in real-time\n"
-		message += "• ✨ **Enhanced Transparency** - From simple 'Thinking...' to detailed step-by-step progress\n"
-		message += "• 🔄 **Backwards Compatible** - Existing behavior unchanged unless feature flag is enabled\n"
-		message += "• ⚙️ **Stream-JSON Integration** - Seamless parsing of Claude Code CLI streaming output\n"
+	message += "*Changes in this release:*\n"
+	for _, change := range changes {
+		message += fmt.Sprintf("• %s\n", change)
 	}
 	
 	message += "\n📋 *Full details*: See <https://github.com/ghabxph/claude-on-slack/blob/main/CHANGELOG.md|CHANGELOG.md>\n"

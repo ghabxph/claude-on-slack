@@ -93,9 +93,10 @@ type StreamingResponse struct {
 
 // ToolCall represents a tool execution in the thinking process
 type ToolCall struct {
-	Name   string                 `json:"name"`
-	Input  map[string]interface{} `json:"input"`
-	Order  int                    `json:"order"`
+	Name    string                 `json:"name"`
+	Input   map[string]interface{} `json:"input"`
+	Order   int                    `json:"order"`
+	Context string                 `json:"context,omitempty"` // Thinking context that led to this tool call
 }
 
 // ClaudeUsage represents token usage information
@@ -841,64 +842,72 @@ func (e *Executor) parseStreamingResponse(responseBytes []byte) (*StreamingRespo
 
 // FormatToolCallForSlack formats a tool call for display in Slack
 func FormatToolCallForSlack(toolCall ToolCall) string {
+	// Helper function to format with context
+	formatWithContext := func(icon, action, target, fallback string) string {
+		if toolCall.Context != "" {
+			return fmt.Sprintf("%s %s (%s %s)", icon, toolCall.Context, action, target)
+		}
+		return fallback
+	}
+	
 	switch toolCall.Name {
 	case "Read":
 		if filePath, ok := toolCall.Input["file_path"].(string); ok {
-			return fmt.Sprintf("🔍 _Reading %s..._", filePath)
+			return formatWithContext("🔍", "_Reading_", fmt.Sprintf("_%s..._", filePath), fmt.Sprintf("🔍 _Reading %s..._", filePath))
 		}
-		return "🔍 _Reading file..._"
+		return formatWithContext("🔍", "_Reading_", "_file..._", "🔍 _Reading file..._")
 		
 	case "Write":
 		if filePath, ok := toolCall.Input["file_path"].(string); ok {
-			return fmt.Sprintf("✏️ _Writing to %s..._", filePath)
+			return formatWithContext("✏️", "_Writing to_", fmt.Sprintf("_%s..._", filePath), fmt.Sprintf("✏️ _Writing to %s..._", filePath))
 		}
-		return "✏️ _Writing file..._"
+		return formatWithContext("✏️", "_Writing_", "_file..._", "✏️ _Writing file..._")
 		
 	case "Edit":
 		if filePath, ok := toolCall.Input["file_path"].(string); ok {
-			return fmt.Sprintf("✏️ _Editing %s..._", filePath)
+			return formatWithContext("✏️", "_Editing_", fmt.Sprintf("_%s..._", filePath), fmt.Sprintf("✏️ _Editing %s..._", filePath))
 		}
-		return "✏️ _Editing file..._"
+		return formatWithContext("✏️", "_Editing_", "_file..._", "✏️ _Editing file..._")
 		
 	case "Bash":
 		if command, ok := toolCall.Input["command"].(string); ok {
 			// Don't truncate commands - users need to see the full command
-			return fmt.Sprintf("⚙️ _Running `%s`..._", command)
+			return formatWithContext("⚙️", "_Running_", fmt.Sprintf("_`%s`..._", command), fmt.Sprintf("⚙️ _Running `%s`..._", command))
 		}
-		return "⚙️ _Running command..._"
+		return formatWithContext("⚙️", "_Running_", "_command..._", "⚙️ _Running command..._")
 		
 	case "LS":
 		if path, ok := toolCall.Input["path"].(string); ok {
-			return fmt.Sprintf("📁 _Listing %s..._", path)
+			return formatWithContext("📁", "_Listing_", fmt.Sprintf("_%s..._", path), fmt.Sprintf("📁 _Listing %s..._", path))
 		}
-		return "📁 _Listing directory..._"
+		return formatWithContext("📁", "_Listing_", "_directory..._", "📁 _Listing directory..._")
 		
 	case "Grep":
 		if pattern, ok := toolCall.Input["pattern"].(string); ok {
-			return fmt.Sprintf("🔎 _Searching for '%s'..._", pattern)
+			return formatWithContext("🔎", "_Searching for_", fmt.Sprintf("_'%s'..._", pattern), fmt.Sprintf("🔎 _Searching for '%s'..._", pattern))
 		}
-		return "🔎 _Searching files..._"
+		return formatWithContext("🔎", "_Searching_", "_files..._", "🔎 _Searching files..._")
 		
 	case "Glob":
 		if pattern, ok := toolCall.Input["pattern"].(string); ok {
-			return fmt.Sprintf("🔍 _Finding files matching '%s'..._", pattern)
+			return formatWithContext("🔍", "_Finding files matching_", fmt.Sprintf("_'%s'..._", pattern), fmt.Sprintf("🔍 _Finding files matching '%s'..._", pattern))
 		}
-		return "🔍 _Finding files..._"
+		return formatWithContext("🔍", "_Finding_", "_files..._", "🔍 _Finding files..._")
 		
 	case "WebFetch":
 		if url, ok := toolCall.Input["url"].(string); ok {
-			return fmt.Sprintf("🌐 _Fetching %s..._", url)
+			return formatWithContext("🌐", "_Fetching_", fmt.Sprintf("_%s..._", url), fmt.Sprintf("🌐 _Fetching %s..._", url))
 		}
-		return "🌐 _Fetching web content..._"
+		return formatWithContext("🌐", "_Fetching_", "_web content..._", "🌐 _Fetching web content..._")
 		
 	case "Task":
-		return "🤖 _Launching specialized agent..._"
+		return formatWithContext("🤖", "_Launching_", "_specialized agent..._", "🤖 _Launching specialized agent..._")
 		
 	case "TodoWrite":
 		if todosInput, ok := toolCall.Input["todos"]; ok {
 			return formatTodoWriteInput(todosInput)
 		}
-		return "📋 _Updating todo list..._"
+		return formatWithContext("📋", "_Updating_", "_todo list..._", "📋 _Updating todo list..._")
 		
 	case "ToolResult":
 		// Extract the content for tool result display
@@ -908,7 +917,7 @@ func FormatToolCallForSlack(toolCall ToolCall) string {
 		return "✅ _Tool completed_"
 		
 	default:
-		return fmt.Sprintf("🔧 _Using %s tool..._", toolCall.Name)
+		return formatWithContext("🔧", fmt.Sprintf("_Using %s tool_", toolCall.Name), "_..._", fmt.Sprintf("🔧 _Using %s tool..._", toolCall.Name))
 	}
 }
 
@@ -1433,6 +1442,7 @@ Remember: You have full access to the machine's capabilities, but always priorit
 	// Process streaming output
 	var responseLines []string
 	toolCallOrder := 0
+	var recentThinkingText []string // Track recent thinking context
 	
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
@@ -1452,6 +1462,19 @@ Remember: You have full access to the machine's capabilities, but always priorit
 			continue
 		}
 		
+		// Collect text content for context (before tool calls)
+		if event.Type == "assistant" && event.Message != nil && event.Message.Content != nil {
+			for _, content := range event.Message.Content {
+				if content.Type == "text" && content.Text != "" {
+					// Add to recent thinking text, keep only last few lines to avoid huge context
+					recentThinkingText = append(recentThinkingText, content.Text)
+					if len(recentThinkingText) > 10 { // Keep last 10 text chunks
+						recentThinkingText = recentThinkingText[1:]
+					}
+				}
+			}
+		}
+		
 		// Check for tool calls and trigger callback
 		if event.Type == "assistant" && event.Message != nil && event.Message.Content != nil {
 			for _, content := range event.Message.Content {
@@ -1461,11 +1484,27 @@ Remember: You have full access to the machine's capabilities, but always priorit
 						zap.Int("order", toolCallOrder),
 						zap.String("event_line", line))
 					
-					toolCall := ToolCall{
-						Name:  content.Name,
-						Input: content.Input,
-						Order: toolCallOrder,
+					// Prepare context from recent thinking text
+					context := ""
+					if len(recentThinkingText) > 0 {
+						// Join recent thinking text and truncate if too long
+						fullContext := strings.Join(recentThinkingText, " ")
+						if len(fullContext) > 200 { // Limit context to 200 chars for readability
+							context = fullContext[:200] + "..."
+						} else {
+							context = fullContext
+						}
 					}
+					
+					toolCall := ToolCall{
+						Name:    content.Name,
+						Input:   content.Input,
+						Order:   toolCallOrder,
+						Context: context,
+					}
+					
+					// Clear recent thinking text after using it for context
+					recentThinkingText = []string{}
 					onToolCall(toolCall)
 					toolCallOrder++
 				}

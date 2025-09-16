@@ -6,8 +6,6 @@ import (
 
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
-
-	"github.com/ghabxph/claude-on-slack/internal/version"
 )
 
 type DeploymentNotifier struct {
@@ -24,8 +22,8 @@ func NewDeploymentNotifier(slackClient *slack.Client, channels []string, logger 
 	}
 }
 
-func (n *DeploymentNotifier) NotifyDeployment(changes []string) error {
-	message := n.FormatDeploymentMessage(version.GetVersion(), changes)
+func (n *DeploymentNotifier) NotifyDeployment(version string, changes []string) error {
+	message := n.FormatDeploymentMessage(version, changes)
 	
 	return n.SendConcurrentNotifications(message)
 }
@@ -34,17 +32,9 @@ func (n *DeploymentNotifier) FormatDeploymentMessage(version string, changes []s
 	message := fmt.Sprintf("🚀 *Claude Bot Deployment Complete* - v%s\n", version)
 	message += fmt.Sprintf("⏰ Deployed at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 UTC"))
 	
-	if len(changes) > 0 {
-		message += "*Changes in this release:*\n"
-		for _, change := range changes {
-			message += fmt.Sprintf("• %s\n", change)
-		}
-	} else {
-		message += "• 🛠️ **Database Query Robustness** - Replaced SELECT * with explicit columns for schema safety\n"
-		message += "• 🔧 **SQL Scan Error Fix** - Resolved critical column order mismatch in child session queries\n"
-		message += "• 🚀 **Migration-Proof Design** - Future database changes won't break existing queries\n"
-		message += "• 🎯 **Type Safety** - Eliminated runtime SQL scan errors from column/field misalignment\n"
-		message += "• ⚡ **Performance & Maintainability** - Explicit column selection improves query optimization\n"
+	message += "*Changes in this release:*\n"
+	for _, change := range changes {
+		message += fmt.Sprintf("• %s\n", change)
 	}
 	
 	message += "\n📋 *Full details*: See <https://github.com/ghabxph/claude-on-slack/blob/main/CHANGELOG.md|CHANGELOG.md>\n"

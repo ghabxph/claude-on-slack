@@ -30,7 +30,6 @@ import (
 	"github.com/ghabxph/claude-on-slack/internal/notifications"
 	"github.com/ghabxph/claude-on-slack/internal/repository"
 	"github.com/ghabxph/claude-on-slack/internal/session"
-	"github.com/ghabxph/claude-on-slack/internal/version"
 )
 
 // Service represents the main bot service
@@ -115,7 +114,7 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 // Start starts the bot service
 func (s *Service) Start(ctx context.Context) error {
 	s.logger.Info("Starting Claude on Slack bot",
-		zap.String("version", version.GetVersion()),
+		zap.String("version", s.config.AppVersion),
 		zap.String("bot_name", s.config.BotName),
 		zap.String("command_prefix", s.config.CommandPrefix))
 
@@ -544,21 +543,24 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 		text = strings.Join(append([]string{text}, queuedMessages...), " ")
 	}
 
-	// Send "Thinking..." message immediately and capture for deletion
-	// Get current mode
-	currentMode, err := s.getPermissionModeForChannel(event.Channel, userSession.GetID())
-	if err != nil {
-		currentMode = config.PermissionModeDefault
-	}
-	
-	// Format Thinking message with Mode, Session, and Working Dir
-	thinkingMsg := fmt.Sprintf("🤔 _Thinking..._\n\n_• Mode: `%s`\n• Session: `%s`\n• Working Dir: `%s`_",
-		currentMode, userSession.GetID(), userSession.GetCurrentWorkDir())
-	
-	_, thinkingTimestamp, err := s.slackAPI.PostMessage(event.Channel, slack.MsgOptionText(thinkingMsg, false))
-	if err != nil {
-		s.logger.Error("Failed to send thinking message", zap.Error(err))
-		thinkingTimestamp = "" // Ensure it's empty if posting failed
+	// Send "Thinking..." message only if THINKING_PROCESS is disabled
+	var thinkingTimestamp string
+	if !s.config.IsFeatureEnabled("THINKING_PROCESS") {
+		// Get current mode
+		currentMode, err := s.getPermissionModeForChannel(event.Channel, userSession.GetID())
+		if err != nil {
+			currentMode = config.PermissionModeDefault
+		}
+		
+		// Format Thinking message with Mode, Session, and Working Dir
+		thinkingMsg := fmt.Sprintf("🤔 _Thinking..._\n\n_• Mode: `%s`\n• Session: `%s`\n• Working Dir: `%s`_",
+			currentMode, userSession.GetID(), userSession.GetCurrentWorkDir())
+		
+		_, thinkingTimestamp, err = s.slackAPI.PostMessage(event.Channel, slack.MsgOptionText(thinkingMsg, false))
+		if err != nil {
+			s.logger.Error("Failed to send thinking message", zap.Error(err))
+			thinkingTimestamp = "" // Ensure it's empty if posting failed
+		}
 	}
 
 	// Get allowed tools for this user
@@ -633,13 +635,26 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 		permMode = config.PermissionModeDefault
 	}
 
-	// Process with Claude Code CLI
-	response, newClaudeSessionID, cost, rawJSON, err := s.claudeExecutor.ProcessClaudeCodeRequest(ctx, text, claudeSessionID, event.User, userSession.GetCurrentWorkDir(), allowedTools, isNewSession, permMode)
-	if err != nil {
-		s.logger.Error("Claude Code processing failed", zap.Error(err))
+	// Process with Claude Code CLI (with streaming support if THINKING_PROCESS is enabled)
+	var response string
+	var newClaudeSessionID string
+	var cost float64
+	var rawJSON string
+	var claudeErr error
+
+	if s.config.IsFeatureEnabled("THINKING_PROCESS") {
+		// Use streaming execution with real-time tool updates
+		response, newClaudeSessionID, cost, rawJSON, claudeErr = s.processClaudeWithStreaming(ctx, text, claudeSessionID, event.User, userSession.GetCurrentWorkDir(), allowedTools, isNewSession, permMode, event.Channel)
+	} else {
+		// Use regular execution
+		response, newClaudeSessionID, cost, rawJSON, claudeErr = s.claudeExecutor.ProcessClaudeCodeRequest(ctx, text, claudeSessionID, event.User, userSession.GetCurrentWorkDir(), allowedTools, isNewSession, permMode)
+	}
+	
+	if claudeErr != nil {
+		s.logger.Error("Claude Code processing failed", zap.Error(claudeErr))
 		errCtx := logging.CreateErrorContext(event.Channel, event.User, "message_processor", "claude_processing")
 		errCtx.WithSession(claudeSessionID)
-		return s.logErrorWithTrace(ctx, errCtx, err, "Claude Code processing failed")
+		return s.logErrorWithTrace(ctx, errCtx, claudeErr, "Claude Code processing failed")
 	}
 	
 	// Store the latest response (raw JSON)
@@ -1631,14 +1646,14 @@ func (s *Service) sendStartupNotification() {
 		time.Sleep(3 * time.Second)
 
 		changes := []string{
-			"Enhanced session management with interactive features",
-			"Smart path suggestions based on session history",
-			"Improved /session command with session listing",
-			"Path-based session switching with /session . <path>",
-			"Intelligent session selection for existing paths",
+			"🧠 Real-Time Thinking Process - See Claude's tool execution live (opt-in with FEATURES=THINKING_PROCESS)",
+			"🔍 Live Tool Updates - Watch Claude read files, run commands, and write code in real-time",
+			"✨ Enhanced Transparency - From simple 'Thinking...' to detailed step-by-step progress",
+			"🔄 Backwards Compatible - Existing behavior unchanged unless feature flag is enabled",
+			"🏗️ Version Consolidation - Single source of truth for version in config.AppVersion",
 		}
 
-		if err := notifier.NotifyDeployment(changes); err != nil {
+		if err := notifier.NotifyDeployment(s.config.AppVersion, changes); err != nil {
 			s.logger.Error("Failed to send startup notification", zap.Error(err))
 		} else {
 			s.logger.Info("Startup notification sent successfully")
@@ -2090,4 +2105,51 @@ func (s *Service) handleDeleteSessionCommand(userID, channelID, text string) str
 	}
 
 	return fmt.Sprintf("✅ **Session Deleted**\n\nSession `%s` has been successfully deleted along with all its conversation history.", sessionID)
+}
+
+// processClaudeWithStreaming processes Claude with real-time tool execution updates
+func (s *Service) processClaudeWithStreaming(ctx context.Context, userMessage, sessionID, userID, workingDir string, allowedTools []string, isNewSession bool, permMode config.PermissionMode, channelID string) (string, string, float64, string, error) {
+	
+	// Track tool executions for progress updates
+	toolCount := 0
+	var lastProgressMessage string
+	
+	// Create callback function for tool execution updates
+	onToolCall := func(toolCall claude.ToolCall) {
+		toolCount++
+		progressMsg := claude.FormatToolCallForSlack(toolCall)
+		lastProgressMessage = progressMsg
+		
+		// Send each tool execution as a separate Slack message (synchronous to ensure immediate delivery)
+		_, _, err := s.slackAPI.PostMessage(channelID, slack.MsgOptionText(progressMsg, false))
+		if err != nil {
+			s.logger.Debug("Failed to send tool progress message", 
+				zap.Error(err),
+				zap.String("channel", channelID),
+				zap.String("tool", toolCall.Name),
+				zap.String("message", progressMsg))
+		}
+		
+		s.logger.Info("Tool execution progress",
+			zap.String("tool", toolCall.Name),
+			zap.Int("order", toolCall.Order),
+			zap.String("session_id", sessionID),
+			zap.String("channel_id", channelID))
+	}
+	
+	// Execute Claude with streaming and tool callback
+	claudeResp, err := s.claudeExecutor.ExecuteClaudeCodeWithStreaming(
+		ctx, userMessage, sessionID, workingDir, allowedTools, isNewSession, permMode, onToolCall)
+	if err != nil {
+		return "", "", 0, "", err
+	}
+	
+	// Log completion with tool summary
+	s.logger.Info("Claude streaming execution completed",
+		zap.String("session_id", claudeResp.SessionID),
+		zap.Int("tool_calls", toolCount),
+		zap.Float64("cost_usd", claudeResp.TotalCostUSD),
+		zap.String("last_tool", lastProgressMessage))
+	
+	return claudeResp.Result, claudeResp.SessionID, claudeResp.TotalCostUSD, claudeResp.LatestResponse, nil
 }

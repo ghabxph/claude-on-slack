@@ -260,9 +260,9 @@ message += "\n📋 *Full details*: See <https://github.com/ghabxph/claude-on-sla
 
 ### **Release Checklist:**
 
-- [ ] Update version in `internal/version/version.go`
+- [ ] Update version in `internal/config/config.go` (AppVersion field) - **Single Source of Truth**
 - [ ] Update CHANGELOG.md with detailed changes
-- [ ] **Update deployment message in `internal/notifications/deploy.go`** ⚠️
+- [ ] **Update deployment message in `internal/bot/service.go` (changes array)** ⚠️
 - [ ] Update README.md if needed
 - [ ] Test compilation: `go build -o test ./cmd/slack-claude-bot && rm test`
 - [ ] Deploy and test functionality
@@ -341,8 +341,8 @@ When adding features that need new Slack permissions:
 ### **Always Update These Files:**
 - `CHANGELOG.md` - Detailed change documentation
 - `README.md` - User-facing setup and usage instructions  
-- `internal/notifications/deploy.go` - Deployment message ⚠️
-- `internal/version/version.go` - Semantic version number
+- `internal/bot/service.go` - Deployment message changes array ⚠️
+- `internal/config/config.go` - Application version (AppVersion field) - **Single Source of Truth**
 
 ### **Documentation Standards:**
 - Use semantic versioning (MAJOR.MINOR.PATCH)

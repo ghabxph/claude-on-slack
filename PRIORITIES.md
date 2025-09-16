@@ -55,9 +55,9 @@ Enhanced error reporting successfully deployed - now shows detailed stderr outpu
 - **Focus**: Slack bot for Claude Code integration
 
 ### Version Management Rules
-- **CRITICAL**: When incrementing version numbers in Go projects (internal/version/version.go), ALWAYS update the corresponding redeploy script
+- **CRITICAL**: Version management now uses **single source of truth** in `internal/config/config.go` (AppVersion field)
 - **Process**:
-  1. Update `internal/version/version.go` with new version
-  2. Update deployment script version reference (if applicable)
+  1. Update `internal/config/config.go` AppVersion field with new version
+  2. Update deployment message changes array in `internal/bot/service.go` 
   3. Update project documentation (CHANGELOG.md, CLAUDE.md)
-  4. Update deployment notification messages
+  4. **No longer needed**: `internal/version/version.go` Version constant (removed for consolidation)

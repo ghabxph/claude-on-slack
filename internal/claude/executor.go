@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -35,6 +36,66 @@ type ClaudeCodeResponse struct {
 	Usage        ClaudeUsage `json:"usage"`
 	Error        string      `json:"error,omitempty"`
 	LatestResponse string    `json:"-"` // Raw JSON response
+}
+
+// StreamingEvent represents a single streaming JSON event
+type StreamingEvent struct {
+	Type    string                 `json:"type"`
+	Subtype string                 `json:"subtype,omitempty"`
+	Message *StreamingMessage      `json:"message,omitempty"`
+	Result  *StreamingResult       `json:"result,omitempty"`
+	// Additional fields for system events
+	SessionID string   `json:"session_id,omitempty"`
+	Tools     []string `json:"tools,omitempty"`
+}
+
+// StreamingMessage represents a message in the streaming response
+type StreamingMessage struct {
+	ID      string                   `json:"id"`
+	Type    string                   `json:"type"`
+	Role    string                   `json:"role"`
+	Content []StreamingContent       `json:"content"`
+	Usage   *ClaudeUsage            `json:"usage,omitempty"`
+}
+
+// StreamingContent represents content within a streaming message
+type StreamingContent struct {
+	Type      string                 `json:"type"`
+	Text      string                 `json:"text,omitempty"`
+	ID        string                 `json:"id,omitempty"`
+	Name      string                 `json:"name,omitempty"`
+	Input     map[string]interface{} `json:"input,omitempty"`
+	ToolUseID string                 `json:"tool_use_id,omitempty"`
+	Content   string                 `json:"content,omitempty"`
+}
+
+// StreamingResult represents the final result in streaming mode
+type StreamingResult struct {
+	IsError       bool         `json:"is_error"`
+	Result        string       `json:"result"`
+	SessionID     string       `json:"session_id"`
+	TotalCostUSD  float64      `json:"total_cost_usd"`
+	Usage         ClaudeUsage  `json:"usage"`
+	DurationMS    int          `json:"duration_ms"`
+}
+
+// StreamingResponse aggregates all streaming events into a coherent response
+type StreamingResponse struct {
+	Events       []StreamingEvent `json:"events"`
+	SessionID    string           `json:"session_id"`
+	TotalCostUSD float64          `json:"total_cost_usd"`
+	Usage        ClaudeUsage      `json:"usage"`
+	Result       string           `json:"result"`
+	IsError      bool             `json:"is_error"`
+	Error        string           `json:"error,omitempty"`
+	ToolCalls    []ToolCall       `json:"tool_calls"`
+}
+
+// ToolCall represents a tool execution in the thinking process
+type ToolCall struct {
+	Name   string                 `json:"name"`
+	Input  map[string]interface{} `json:"input"`
+	Order  int                    `json:"order"`
 }
 
 // ClaudeUsage represents token usage information
@@ -93,8 +154,16 @@ func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, se
 	// Prepare Claude Code CLI arguments
 	args := []string{
 		"--print",
-		"--output-format", "json",
 		"--model", "sonnet",
+	}
+
+	// Check if THINKING_PROCESS feature is enabled
+	if e.config.IsFeatureEnabled("THINKING_PROCESS") {
+		args = append(args, "--input-format", "stream-json")
+		args = append(args, "--output-format", "stream-json")
+		args = append(args, "--verbose")
+	} else {
+		args = append(args, "--output-format", "json")
 	}
 	
 	// Add session flag based on whether it's a new session or continuation
@@ -165,8 +234,27 @@ Remember: You have full access to the machine's capabilities, but always priorit
 	cmd := exec.CommandContext(ctx, e.claudeCodePath, args...)
 	cmd.Dir = workingDir
 	
-	// Set up stdin with user message
-	cmd.Stdin = strings.NewReader(userMessage)
+	// Set up stdin with user message (format depends on whether streaming is enabled)
+	var inputData string
+	if e.config.IsFeatureEnabled("THINKING_PROCESS") {
+		// For stream-json, wrap user message in JSON format
+		inputJSON := map[string]interface{}{
+			"type": "user",
+			"message": map[string]interface{}{
+				"role":    "user",
+				"content": userMessage,
+			},
+		}
+		inputBytes, err := json.Marshal(inputJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal streaming input: %w", err)
+		}
+		inputData = string(inputBytes)
+	} else {
+		// For regular JSON, use plain text
+		inputData = userMessage
+	}
+	cmd.Stdin = strings.NewReader(inputData)
 	
 	// Capture stdout and stderr
 	var stdout, stderr bytes.Buffer
@@ -208,18 +296,44 @@ Remember: You have full access to the machine's capabilities, but always priorit
 		return nil, enhancedErr
 	}
 	
-	// Parse JSON response
-	var response ClaudeCodeResponse
+	// Parse response based on format
 	responseBytes := stdout.Bytes()
-	if err := json.Unmarshal(responseBytes, &response); err != nil {
-		e.logger.Error("Failed to parse Claude Code response",
-			zap.Error(err),
-			zap.String("stdout", stdout.String()))
-		return nil, fmt.Errorf("failed to parse Claude Code response: %w", err)
-	}
+	var response ClaudeCodeResponse
 	
-	// Save raw response
-	response.LatestResponse = string(responseBytes)
+	if e.config.IsFeatureEnabled("THINKING_PROCESS") {
+		// Parse streaming JSON response
+		streamingResp, err := e.parseStreamingResponse(responseBytes)
+		if err != nil {
+			e.logger.Error("Failed to parse streaming Claude Code response",
+				zap.Error(err),
+				zap.String("stdout", stdout.String()))
+			return nil, fmt.Errorf("failed to parse streaming Claude Code response: %w", err)
+		}
+		
+		// Convert streaming response to regular response format
+		response = ClaudeCodeResponse{
+			Type:         "result",
+			Subtype:      "success",
+			IsError:      streamingResp.IsError,
+			Result:       streamingResp.Result,
+			SessionID:    streamingResp.SessionID,
+			TotalCostUSD: streamingResp.TotalCostUSD,
+			Usage:        streamingResp.Usage,
+			Error:        streamingResp.Error,
+			LatestResponse: string(responseBytes),
+		}
+	} else {
+		// Parse regular JSON response
+		if err := json.Unmarshal(responseBytes, &response); err != nil {
+			e.logger.Error("Failed to parse Claude Code response",
+				zap.Error(err),
+				zap.String("stdout", stdout.String()))
+			return nil, fmt.Errorf("failed to parse Claude Code response: %w", err)
+		}
+		
+		// Save raw response
+		response.LatestResponse = string(responseBytes)
+	}
 	
 	// Check for errors in response
 	if response.IsError {
@@ -642,4 +756,799 @@ The summary should be comprehensive enough that someone could read it and immedi
 		zap.Int("summary_length", len(response.Result)))
 
 	return response.Result, nil
+}
+
+// parseStreamingResponse parses streaming JSON output into a coherent response
+func (e *Executor) parseStreamingResponse(responseBytes []byte) (*StreamingResponse, error) {
+	lines := strings.Split(string(responseBytes), "\n")
+	
+	streamingResp := &StreamingResponse{
+		Events:    make([]StreamingEvent, 0),
+		ToolCalls: make([]ToolCall, 0),
+	}
+	
+	toolCallOrder := 0
+	
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		
+		var event StreamingEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			e.logger.Debug("Failed to parse streaming line", 
+				zap.Error(err), 
+				zap.String("line", line))
+			continue
+		}
+		
+		streamingResp.Events = append(streamingResp.Events, event)
+		
+		// Extract key information based on event type
+		switch event.Type {
+		case "system":
+			if event.SessionID != "" {
+				streamingResp.SessionID = event.SessionID
+			}
+			
+		case "assistant":
+			if event.Message != nil && event.Message.Content != nil {
+				for _, content := range event.Message.Content {
+					// Track tool calls for thinking process visibility
+					if content.Type == "tool_use" {
+						toolCall := ToolCall{
+							Name:  content.Name,
+							Input: content.Input,
+							Order: toolCallOrder,
+						}
+						streamingResp.ToolCalls = append(streamingResp.ToolCalls, toolCall)
+						toolCallOrder++
+					}
+					
+					// Collect text content for final response
+					if content.Type == "text" && content.Text != "" {
+						if streamingResp.Result != "" {
+							streamingResp.Result += "\n" + content.Text
+						} else {
+							streamingResp.Result = content.Text
+						}
+					}
+				}
+				
+				// Extract usage information
+				if event.Message.Usage != nil {
+					streamingResp.Usage = *event.Message.Usage
+				}
+			}
+			
+		case "result":
+			if event.Result != nil {
+				// Only overwrite Result if we haven't collected text content yet
+				if streamingResp.Result == "" && event.Result.Result != "" {
+					streamingResp.Result = event.Result.Result
+				}
+				streamingResp.SessionID = event.Result.SessionID
+				streamingResp.TotalCostUSD = event.Result.TotalCostUSD
+				streamingResp.Usage = event.Result.Usage
+				streamingResp.IsError = event.Result.IsError
+			}
+		}
+	}
+	
+	return streamingResp, nil
+}
+
+// FormatToolCallForSlack formats a tool call for display in Slack
+func FormatToolCallForSlack(toolCall ToolCall) string {
+	switch toolCall.Name {
+	case "Read":
+		if filePath, ok := toolCall.Input["file_path"].(string); ok {
+			return fmt.Sprintf("🔍 _Reading %s..._", filePath)
+		}
+		return "🔍 _Reading file..._"
+		
+	case "Write":
+		if filePath, ok := toolCall.Input["file_path"].(string); ok {
+			return fmt.Sprintf("✏️ _Writing to %s..._", filePath)
+		}
+		return "✏️ _Writing file..._"
+		
+	case "Edit":
+		if filePath, ok := toolCall.Input["file_path"].(string); ok {
+			return fmt.Sprintf("✏️ _Editing %s..._", filePath)
+		}
+		return "✏️ _Editing file..._"
+		
+	case "Bash":
+		if command, ok := toolCall.Input["command"].(string); ok {
+			// Don't truncate commands - users need to see the full command
+			return fmt.Sprintf("⚙️ _Running `%s`..._", command)
+		}
+		return "⚙️ _Running command..._"
+		
+	case "LS":
+		if path, ok := toolCall.Input["path"].(string); ok {
+			return fmt.Sprintf("📁 _Listing %s..._", path)
+		}
+		return "📁 _Listing directory..._"
+		
+	case "Grep":
+		if pattern, ok := toolCall.Input["pattern"].(string); ok {
+			return fmt.Sprintf("🔎 _Searching for '%s'..._", pattern)
+		}
+		return "🔎 _Searching files..._"
+		
+	case "Glob":
+		if pattern, ok := toolCall.Input["pattern"].(string); ok {
+			return fmt.Sprintf("🔍 _Finding files matching '%s'..._", pattern)
+		}
+		return "🔍 _Finding files..._"
+		
+	case "WebFetch":
+		if url, ok := toolCall.Input["url"].(string); ok {
+			return fmt.Sprintf("🌐 _Fetching %s..._", url)
+		}
+		return "🌐 _Fetching web content..._"
+		
+	case "Task":
+		return "🤖 _Launching specialized agent..._"
+		
+	case "TodoWrite":
+		if todosInput, ok := toolCall.Input["todos"]; ok {
+			return formatTodoWriteInput(todosInput)
+		}
+		return "📋 _Updating todo list..._"
+		
+	case "ToolResult":
+		// Extract the content for tool result display
+		if content, ok := toolCall.Input["content"].(string); ok {
+			return formatToolResultContent(content)
+		}
+		return "✅ _Tool completed_"
+		
+	default:
+		return fmt.Sprintf("🔧 _Using %s tool..._", toolCall.Name)
+	}
+}
+
+// formatToolResultContent formats tool result content for Slack display
+func formatToolResultContent(content string) string {
+	// Handle different types of tool results
+	content = strings.TrimSpace(content)
+	
+	// Check for file content with line numbers (typical Read tool output)
+	if strings.Contains(content, "→") && (strings.Contains(content, "1→") || strings.Contains(content, "2→") || strings.Contains(content, "3→")) {
+		return formatFileContent(content)
+	}
+	
+	// Check for file update confirmations (Edit/Write tool output)
+	if strings.Contains(content, "has been updated") || strings.Contains(content, "created successfully") {
+		return formatFileUpdateResult(content)
+	}
+	
+	// Check for error messages
+	if strings.Contains(content, "<tool_use_error>") || strings.Contains(content, "error") {
+		return formatErrorResult(content)
+	}
+	
+	// Check for command output (Bash tool results)
+	if len(strings.Split(content, "\n")) > 1 && !strings.Contains(content, "→") {
+		return formatCommandOutput(content)
+	}
+	
+	// Check if it looks like line-numbered content that wasn't caught above
+	if strings.Contains(content, "→") {
+		return formatFileContent(content)
+	}
+	
+	// Default formatting for simple results - use code block if it looks like code
+	if looksLikeCode(content) {
+		lines := strings.Split(strings.TrimSpace(content), "\n")
+		if len(lines) == 1 {
+			if len(content) > 400 {
+				content = content[:397] + "..."
+			}
+			return fmt.Sprintf("✅ Result:\n```\n%s\n```", content)
+		}
+		// Multiple lines
+		linesToShow := len(lines)
+		if linesToShow > 20 {
+			linesToShow = 20
+		}
+		
+		codeBlock := ""
+		for i := 0; i < linesToShow; i++ {
+			line := lines[i]
+			// Cap each line at 400 characters to prevent Slack display issues
+			if len(line) > 400 {
+				line = line[:397] + "..."
+			}
+			codeBlock += line + "\n"
+		}
+		
+		if len(lines) > 20 {
+			return fmt.Sprintf("✅ Result:\n```\n%s```\n_(+ %d more lines)_", codeBlock, len(lines)-20)
+		} else {
+			return fmt.Sprintf("✅ Result:\n```\n%s```", codeBlock)
+		}
+	}
+	
+	// Plain text result
+	if len(content) > 100 {
+		content = content[:97] + "..."
+	}
+	return fmt.Sprintf("✅ _%s_", content)
+}
+
+// looksLikeCode determines if content should be displayed in a code block
+func looksLikeCode(content string) bool {
+	content = strings.TrimSpace(content)
+	
+	// Check for common code patterns
+	codePatterns := []string{
+		"message +=", "package ", "import ", "func ", "def ", "class ",
+		"if ", "for ", "while ", "return ", "var ", "const ", "let ",
+		"{", "}", "(", ")", "[", "]", ";", "=", ":", "->", "=>",
+		"git ", "npm ", "go ", "python ", "node ", "curl ", "ls ", "cd ",
+	}
+	
+	lowerContent := strings.ToLower(content)
+	for _, pattern := range codePatterns {
+		if strings.Contains(lowerContent, pattern) {
+			return true
+		}
+	}
+	
+	// Check if it has multiple lines with indentation or special characters
+	lines := strings.Split(content, "\n")
+	if len(lines) > 1 {
+		for _, line := range lines {
+			if strings.HasPrefix(line, "  ") || strings.HasPrefix(line, "\t") {
+				return true
+			}
+			if strings.Contains(line, "=") || strings.Contains(line, "{") || strings.Contains(line, "}") {
+				return true
+			}
+		}
+	}
+	
+	return false
+}
+
+// formatTodoWriteInput formats TodoWrite tool input to display the todo list
+func formatTodoWriteInput(todosInput interface{}) string {
+	// Parse the todos array from the input
+	todosArray, ok := todosInput.([]interface{})
+	if !ok {
+		return "📋 _Updating todo list..._"
+	}
+	
+	if len(todosArray) == 0 {
+		return "📋 _Todo list cleared_"
+	}
+	
+	var todoLines []string
+	completedCount := 0
+	inProgressCount := 0
+	pendingCount := 0
+	
+	for _, todoItem := range todosArray {
+		todoMap, ok := todoItem.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		
+		content, hasContent := todoMap["content"].(string)
+		status, hasStatus := todoMap["status"].(string)
+		
+		if !hasContent || !hasStatus {
+			continue
+		}
+		
+		// Format based on status
+		var statusIcon, formattedLine string
+		switch status {
+		case "completed":
+			statusIcon = "✅"
+			formattedLine = fmt.Sprintf("%s ~~%s~~", statusIcon, content)
+			completedCount++
+		case "in_progress":
+			statusIcon = "🔄"
+			formattedLine = fmt.Sprintf("%s **%s**", statusIcon, content)
+			inProgressCount++
+		case "pending":
+			statusIcon = "⏳"
+			formattedLine = fmt.Sprintf("%s %s", statusIcon, content)
+			pendingCount++
+		default:
+			statusIcon = "📌"
+			formattedLine = fmt.Sprintf("%s %s", statusIcon, content)
+			pendingCount++
+		}
+		
+		todoLines = append(todoLines, formattedLine)
+	}
+	
+	if len(todoLines) == 0 {
+		return "📋 _Updating todo list..._"
+	}
+	
+	// Create summary line
+	total := len(todoLines)
+	summaryParts := []string{}
+	if completedCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d completed", completedCount))
+	}
+	if inProgressCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d in progress", inProgressCount))
+	}
+	if pendingCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d pending", pendingCount))
+	}
+	
+	summaryLine := fmt.Sprintf("📋 **Todo List Updated** (%d total: %s)", total, strings.Join(summaryParts, ", "))
+	
+	// Combine summary and todo items
+	result := summaryLine + "\n\n"
+	for _, line := range todoLines {
+		result += line + "\n"
+	}
+	
+	return strings.TrimSpace(result)
+}
+
+// formatFileContent formats file content with syntax highlighting
+func formatFileContent(content string) string {
+	lines := strings.Split(content, "\n")
+	codeLines := []string{}
+	
+	// Extract code lines, preserving line numbers when available
+	for _, line := range lines {
+		if strings.Contains(line, "→") {
+			// Keep the line number but clean up the formatting
+			parts := strings.SplitN(line, "→", 2)
+			if len(parts) > 1 {
+				// Extract line number and clean it up
+				lineNumPart := strings.TrimSpace(parts[0])
+				codePart := parts[1]
+				
+				// Format as "lineNum: code" for better display
+				formattedLine := fmt.Sprintf("%s: %s", lineNumPart, codePart)
+				codeLines = append(codeLines, formattedLine)
+			}
+		}
+	}
+	
+	if len(codeLines) == 0 {
+		return "✅ _File read_"
+	}
+	
+	// Show preview of file content
+	if len(codeLines) == 1 {
+		code := strings.TrimSpace(codeLines[0])
+		// Cap single line at 400 characters to prevent Slack display issues
+		if len(code) > 400 {
+			code = code[:397] + "..."
+		}
+		return fmt.Sprintf("✅ Code preview:\n```\n%s\n```", code)
+	}
+	
+	// Multiple lines - show first 20 lines in code block
+	linesToShow := len(codeLines)
+	if linesToShow > 20 {
+		linesToShow = 20
+	}
+	
+	codeBlock := ""
+	for i := 0; i < linesToShow; i++ {
+		line := strings.TrimSpace(codeLines[i])
+		// Cap each line at 400 characters to prevent Slack display issues
+		if len(line) > 400 {
+			line = line[:397] + "..."
+		}
+		codeBlock += line + "\n"
+	}
+	
+	if len(codeLines) > 20 {
+		return fmt.Sprintf("✅ Code preview:\n```\n%s```\n_(+ %d more lines)_", codeBlock, len(codeLines)-20)
+	} else {
+		return fmt.Sprintf("✅ Code preview:\n```\n%s```", codeBlock)
+	}
+}
+
+// formatFileUpdateResult formats file update/creation confirmations
+func formatFileUpdateResult(content string) string {
+	// Extract filename if possible
+	if strings.Contains(content, "has been updated") {
+		if strings.Contains(content, "Here's the result") {
+			// This means it includes the updated content - show it
+			return formatFileUpdateWithContent(content)
+		}
+		return "✅ _File updated successfully_"
+	}
+	
+	if strings.Contains(content, "created successfully") {
+		return "✅ _File created successfully_"
+	}
+	
+	return "✅ _Operation completed_"
+}
+
+// formatFileUpdateWithContent formats file updates that include the new content
+func formatFileUpdateWithContent(content string) string {
+	lines := strings.Split(content, "\n")
+	codeLines := []string{}
+	
+	// Find the code content after "Here's the result of running `cat -n`"
+	inCodeSection := false
+	for _, line := range lines {
+		if strings.Contains(line, "cat -n") {
+			inCodeSection = true
+			continue
+		}
+		if inCodeSection && strings.Contains(line, "→") {
+			parts := strings.SplitN(line, "→", 2)
+			if len(parts) > 1 {
+				// Extract line number and clean it up
+				lineNumPart := strings.TrimSpace(parts[0])
+				codePart := parts[1]
+				
+				// Format as "lineNum: code" for better display
+				formattedLine := fmt.Sprintf("%s: %s", lineNumPart, codePart)
+				codeLines = append(codeLines, formattedLine)
+			}
+		}
+	}
+	
+	if len(codeLines) == 0 {
+		return "✅ _File updated_"
+	}
+	
+	// Show the updated content preview
+	if len(codeLines) == 1 {
+		code := strings.TrimSpace(codeLines[0])
+		// Cap single line at 400 characters to prevent Slack display issues
+		if len(code) > 400 {
+			code = code[:397] + "..."
+		}
+		return fmt.Sprintf("✅ File updated:\n```\n%s\n```", code)
+	}
+	
+	// Multiple lines - show first 20 lines in code block
+	linesToShow := len(codeLines)
+	if linesToShow > 20 {
+		linesToShow = 20
+	}
+	
+	codeBlock := ""
+	for i := 0; i < linesToShow; i++ {
+		line := strings.TrimSpace(codeLines[i])
+		// Cap each line at 400 characters to prevent Slack display issues
+		if len(line) > 400 {
+			line = line[:397] + "..."
+		}
+		codeBlock += line + "\n"
+	}
+	
+	if len(codeLines) > 20 {
+		return fmt.Sprintf("✅ File updated:\n```\n%s```\n_(+ %d more lines)_", codeBlock, len(codeLines)-20)
+	} else {
+		return fmt.Sprintf("✅ File updated:\n```\n%s```", codeBlock)
+	}
+}
+
+// formatErrorResult formats error messages
+func formatErrorResult(content string) string {
+	// Extract error from tool_use_error tags
+	if strings.Contains(content, "<tool_use_error>") {
+		start := strings.Index(content, "<tool_use_error>")
+		end := strings.Index(content, "</tool_use_error>")
+		if start != -1 && end != -1 {
+			errorMsg := content[start+16 : end]
+			if len(errorMsg) > 60 {
+				errorMsg = errorMsg[:57] + "..."
+			}
+			return fmt.Sprintf("❌ _%s_", errorMsg)
+		}
+	}
+	
+	// Handle other error patterns
+	if len(content) > 60 {
+		content = content[:57] + "..."
+	}
+	return fmt.Sprintf("❌ _%s_", content)
+}
+
+// formatCommandOutput formats command execution results
+func formatCommandOutput(content string) string {
+	lines := strings.Split(content, "\n")
+	nonEmptyLines := []string{}
+	
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			nonEmptyLines = append(nonEmptyLines, line)
+		}
+	}
+	
+	if len(nonEmptyLines) == 0 {
+		return "✅ _Command completed (no output)_"
+	}
+	
+	if len(nonEmptyLines) == 1 {
+		output := nonEmptyLines[0]
+		// Cap single line at 400 characters to prevent Slack display issues
+		if len(output) > 400 {
+			output = output[:397] + "..."
+		}
+		return fmt.Sprintf("✅ Command output:\n```\n%s\n```", output)
+	}
+	
+	// Multiple lines - show first 20 lines in code block
+	linesToShow := len(nonEmptyLines)
+	if linesToShow > 20 {
+		linesToShow = 20
+	}
+	
+	outputBlock := ""
+	for i := 0; i < linesToShow; i++ {
+		line := nonEmptyLines[i]
+		// Cap each line at 400 characters to prevent Slack display issues
+		if len(line) > 400 {
+			line = line[:397] + "..."
+		}
+		outputBlock += line + "\n"
+	}
+	
+	if len(nonEmptyLines) > 20 {
+		return fmt.Sprintf("✅ Command output:\n```\n%s```\n_(+ %d more lines)_", outputBlock, len(nonEmptyLines)-20)
+	} else {
+		return fmt.Sprintf("✅ Command output:\n```\n%s```", outputBlock)
+	}
+}
+
+// ExecuteClaudeCodeWithStreaming executes Claude Code with real-time streaming and callback for tool updates
+func (e *Executor) ExecuteClaudeCodeWithStreaming(ctx context.Context, userMessage string, sessionID string, workingDir string, allowedTools []string, isNewSession bool, permissionMode config.PermissionMode, onToolCall func(ToolCall)) (*ClaudeCodeResponse, error) {
+	// This method is only for streaming mode
+	if !e.config.IsFeatureEnabled("THINKING_PROCESS") {
+		// Fall back to regular execution
+		return e.ExecuteClaudeCode(ctx, userMessage, sessionID, workingDir, allowedTools, isNewSession, permissionMode)
+	}
+
+	// Prepare Claude Code CLI arguments for streaming
+	args := []string{
+		"--print",
+		"--model", "sonnet",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+	}
+	
+	// Add session flag
+	if sessionID != "" {
+		if isNewSession {
+			args = append(args, "--session-id", sessionID)
+		} else {
+			args = append(args, "--resume", sessionID)
+		}
+	}
+	
+	// Add allowed tools if specified
+	if len(allowedTools) > 0 {
+		args = append(args, "--allowedTools", strings.Join(allowedTools, ","))
+	}
+	
+	// Add permission mode
+	args = append(args, "--permission-mode", string(permissionMode))
+	
+	// Add image storage directory for file access
+	imageStorageDir := "/tmp/claude-slack-images"
+	args = append(args, "--add-dir", imageStorageDir)
+	
+	// Add system prompt for Slack bot context
+	systemPrompt := `You are Claude Code running in a Slack bot environment with full non-root access to the owner's machine. Your thought process and internal reasoning are not visible to users in Slack, so your final responses should be more verbose and explain how you accomplished tasks.
+
+CRITICAL WORKFLOW - Follow this process for EVERY project:
+
+1. **PLANNING FIRST** - Never write code immediately. Always start by:
+   - Understanding the full scope of what needs to be done
+   - Breaking down complex tasks into smaller steps
+   - Identifying dependencies and potential challenges
+   - Creating a clear implementation plan
+
+2. **THOROUGH RESEARCH** - Before implementing anything:
+   - Examine existing codebase patterns and conventions
+   - Research best practices for the specific technology/framework
+   - Understand the project structure and architecture
+   - Look for similar implementations or examples in the codebase
+
+3. **ASK QUESTIONS** - This is EXTREMELY IMPORTANT:
+   - If any requirement is unclear or ambiguous, ask for clarification
+   - Confirm your understanding of the task before proceeding
+   - Ask about preferences for implementation approaches
+   - Verify assumptions about expected behavior or outcomes
+   - The feedback loop is crucial - better to ask too many questions than make incorrect assumptions
+
+4. **VERBOSE EXPLANATIONS** - Since your thinking isn't visible:
+   - Explain your reasoning for technical decisions
+   - Describe the steps you're taking and why
+   - Share what you discovered during research
+   - Explain any trade-offs or alternative approaches considered
+   - Provide context for why you chose a particular solution
+
+Remember: You have full access to the machine's capabilities, but always prioritize understanding the task completely before taking action. Clear communication and thorough planning prevent costly mistakes and rework.
+
+**IMPORTANT: FORMAT FOR SLACK** - Always format your responses for optimal Slack display:
+- Use Slack formatting (*bold*, _italic_, ` + "`code`" + `) instead of markdown (**bold**, *italic*)
+- Use Slack code blocks with triple backticks for multi-line code
+- Use bullet points with • or - for lists
+- Use appropriate emojis for visual clarity
+- *Never use markdown headings (## text)* - use *bold text:* instead
+- Only use markdown formatting if explicitly requested by the user`
+	args = append(args, "--append-system-prompt", systemPrompt)
+	
+	// Create command with timeout
+	cmd := exec.CommandContext(ctx, e.claudeCodePath, args...)
+	cmd.Dir = workingDir
+	
+	// Set up stdin with JSON formatted user message
+	inputJSON := map[string]interface{}{
+		"type": "user",
+		"message": map[string]interface{}{
+			"role":    "user",
+			"content": userMessage,
+		},
+	}
+	inputBytes, err := json.Marshal(inputJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal streaming input: %w", err)
+	}
+	cmd.Stdin = strings.NewReader(string(inputBytes))
+	
+	// Create pipe for streaming stdout
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	
+	// Capture stderr
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	
+	// Log the execution
+	e.logger.Info("Executing Claude Code CLI with streaming",
+		zap.String("session_id", sessionID),
+		zap.String("working_dir", workingDir),
+		zap.Strings("allowed_tools", allowedTools),
+		zap.Bool("is_new_session", isNewSession))
+	
+	// Start command
+	start := time.Now()
+	err = cmd.Start()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start Claude Code CLI: %w", err)
+	}
+	
+	// Process streaming output
+	var responseLines []string
+	toolCallOrder := 0
+	
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		
+		responseLines = append(responseLines, line)
+		
+		// Parse each line as a streaming event
+		var event StreamingEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			e.logger.Debug("Failed to parse streaming line", 
+				zap.Error(err), 
+				zap.String("line", line))
+			continue
+		}
+		
+		// Check for tool calls and trigger callback
+		if event.Type == "assistant" && event.Message != nil && event.Message.Content != nil {
+			for _, content := range event.Message.Content {
+				if content.Type == "tool_use" && onToolCall != nil {
+					e.logger.Debug("Triggering tool call callback",
+						zap.String("tool", content.Name),
+						zap.Int("order", toolCallOrder),
+						zap.String("event_line", line))
+					
+					toolCall := ToolCall{
+						Name:  content.Name,
+						Input: content.Input,
+						Order: toolCallOrder,
+					}
+					onToolCall(toolCall)
+					toolCallOrder++
+				}
+			}
+		}
+		
+		// Check for tool results and trigger callback
+		if event.Type == "user" && event.Message != nil && event.Message.Content != nil {
+			for _, content := range event.Message.Content {
+				if content.Type == "tool_result" && onToolCall != nil {
+					e.logger.Debug("Triggering tool result callback",
+						zap.String("tool_use_id", content.ToolUseID),
+						zap.String("content_length", fmt.Sprintf("%d", len(content.Content))),
+						zap.String("event_line", line))
+					
+					toolResult := ToolCall{
+						Name:   "ToolResult", // Special name for tool results
+						Input:  map[string]interface{}{"tool_use_id": content.ToolUseID, "content": content.Content},
+						Order:  toolCallOrder,
+					}
+					onToolCall(toolResult)
+					toolCallOrder++
+				}
+			}
+		}
+	}
+	
+	// Wait for command to complete
+	err = cmd.Wait()
+	duration := time.Since(start)
+	
+	if err != nil {
+		stderrOutput := strings.TrimSpace(stderr.String())
+		e.logger.Error("Claude Code CLI streaming execution failed",
+			zap.Error(err),
+			zap.String("stderr", stderrOutput),
+			zap.Duration("duration", duration))
+		
+		debugInfo := map[string]interface{}{
+			"session_id":     sessionID,
+			"is_new_session": isNewSession,
+			"working_dir":    workingDir,
+			"args":          args,
+		}
+		enhancedErr := e.createEnhancedError(err, stderrOutput, duration, debugInfo)
+		return nil, enhancedErr
+	}
+	
+	// Parse complete streaming response
+	responseBytes := []byte(strings.Join(responseLines, "\n"))
+	streamingResp, err := e.parseStreamingResponse(responseBytes)
+	if err != nil {
+		e.logger.Error("Failed to parse complete streaming response",
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to parse streaming response: %w", err)
+	}
+	
+	// Convert to regular response format
+	response := &ClaudeCodeResponse{
+		Type:         "result",
+		Subtype:      "success",
+		IsError:      streamingResp.IsError,
+		Result:       streamingResp.Result,
+		SessionID:    streamingResp.SessionID,
+		TotalCostUSD: streamingResp.TotalCostUSD,
+		Usage:        streamingResp.Usage,
+		Error:        streamingResp.Error,
+		LatestResponse: string(responseBytes),
+	}
+	
+	// Check for errors
+	if response.IsError {
+		e.logger.Error("Claude Code returned error in streaming mode",
+			zap.String("error", response.Error))
+		return nil, fmt.Errorf("claude code error: %s", response.Error)
+	}
+	
+	e.logger.Debug("Claude Code streaming execution successful",
+		zap.String("session_id", response.SessionID),
+		zap.Float64("cost_usd", response.TotalCostUSD),
+		zap.Int("input_tokens", response.Usage.InputTokens),
+		zap.Int("output_tokens", response.Usage.OutputTokens),
+		zap.Duration("duration", duration))
+	
+	return response, nil
 }

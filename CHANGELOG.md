@@ -2,6 +2,29 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.7.0] - 2025-01-16
+
+### Added - Real-Time Thinking Process Visibility 🧠✨
+- **THINKING_PROCESS Feature Flag**: New `FEATURES=THINKING_PROCESS` environment variable to enable Claude's thinking process visibility
+- **Real-Time Tool Execution Display**: See Claude's tool usage in real-time with live message updates (🔍 Reading files, ⚙️ Running commands, ✏️ Writing code)
+- **Stream-JSON Integration**: Seamless integration with Claude Code CLI's streaming JSON format for tool execution transparency
+- **Backwards Compatible**: Existing users see no changes - feature is opt-in only
+- **Slack-Optimized Formatting**: Custom emojis and descriptions for each tool type (Read, Write, Bash, Grep, etc.)
+- **Non-Blocking Updates**: Progress messages don't interfere with Claude's execution performance
+
+### Technical Implementation
+- **Feature Flag System**: Robust feature detection with `config.IsFeatureEnabled()` method
+- **Streaming Parser**: Real-time JSON event parsing with tool call extraction
+- **Dual Execution Modes**: Automatic fallback to regular JSON when streaming is disabled
+- **Tool Progress Callbacks**: Live callback system for real-time Slack message updates
+- **Error Handling**: Graceful degradation and comprehensive logging for debugging
+
+### User Experience
+- **Default Behavior**: `🤔 Thinking...` → Final response (unchanged)  
+- **With THINKING_PROCESS**: `🤔 Claude is thinking...` → `🔍 Reading main.go...` → `⚙️ Running go build...` → `✏️ Writing config.go...` → Final response
+- **Transparency**: Users can now see exactly what Claude is doing step-by-step
+- **Engagement**: More interactive and engaging AI experience with visible "thinking"
+
 ## [2.6.3] - 2025-08-31
 
 ### Enhanced - Markdown Heading Prevention

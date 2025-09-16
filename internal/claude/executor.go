@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -35,6 +36,64 @@ type ClaudeCodeResponse struct {
 	Usage        ClaudeUsage `json:"usage"`
 	Error        string      `json:"error,omitempty"`
 	LatestResponse string    `json:"-"` // Raw JSON response
+}
+
+// StreamingEvent represents a single streaming JSON event
+type StreamingEvent struct {
+	Type    string                 `json:"type"`
+	Subtype string                 `json:"subtype,omitempty"`
+	Message *StreamingMessage      `json:"message,omitempty"`
+	Result  *StreamingResult       `json:"result,omitempty"`
+	// Additional fields for system events
+	SessionID string   `json:"session_id,omitempty"`
+	Tools     []string `json:"tools,omitempty"`
+}
+
+// StreamingMessage represents a message in the streaming response
+type StreamingMessage struct {
+	ID      string                   `json:"id"`
+	Type    string                   `json:"type"`
+	Role    string                   `json:"role"`
+	Content []StreamingContent       `json:"content"`
+	Usage   *ClaudeUsage            `json:"usage,omitempty"`
+}
+
+// StreamingContent represents content within a streaming message
+type StreamingContent struct {
+	Type    string                 `json:"type"`
+	Text    string                 `json:"text,omitempty"`
+	ID      string                 `json:"id,omitempty"`
+	Name    string                 `json:"name,omitempty"`
+	Input   map[string]interface{} `json:"input,omitempty"`
+}
+
+// StreamingResult represents the final result in streaming mode
+type StreamingResult struct {
+	IsError       bool         `json:"is_error"`
+	Result        string       `json:"result"`
+	SessionID     string       `json:"session_id"`
+	TotalCostUSD  float64      `json:"total_cost_usd"`
+	Usage         ClaudeUsage  `json:"usage"`
+	DurationMS    int          `json:"duration_ms"`
+}
+
+// StreamingResponse aggregates all streaming events into a coherent response
+type StreamingResponse struct {
+	Events       []StreamingEvent `json:"events"`
+	SessionID    string           `json:"session_id"`
+	TotalCostUSD float64          `json:"total_cost_usd"`
+	Usage        ClaudeUsage      `json:"usage"`
+	Result       string           `json:"result"`
+	IsError      bool             `json:"is_error"`
+	Error        string           `json:"error,omitempty"`
+	ToolCalls    []ToolCall       `json:"tool_calls"`
+}
+
+// ToolCall represents a tool execution in the thinking process
+type ToolCall struct {
+	Name   string                 `json:"name"`
+	Input  map[string]interface{} `json:"input"`
+	Order  int                    `json:"order"`
 }
 
 // ClaudeUsage represents token usage information
@@ -93,8 +152,16 @@ func (e *Executor) ExecuteClaudeCode(ctx context.Context, userMessage string, se
 	// Prepare Claude Code CLI arguments
 	args := []string{
 		"--print",
-		"--output-format", "json",
 		"--model", "sonnet",
+	}
+
+	// Check if THINKING_PROCESS feature is enabled
+	if e.config.IsFeatureEnabled("THINKING_PROCESS") {
+		args = append(args, "--input-format", "stream-json")
+		args = append(args, "--output-format", "stream-json")
+		args = append(args, "--verbose")
+	} else {
+		args = append(args, "--output-format", "json")
 	}
 	
 	// Add session flag based on whether it's a new session or continuation
@@ -165,8 +232,27 @@ Remember: You have full access to the machine's capabilities, but always priorit
 	cmd := exec.CommandContext(ctx, e.claudeCodePath, args...)
 	cmd.Dir = workingDir
 	
-	// Set up stdin with user message
-	cmd.Stdin = strings.NewReader(userMessage)
+	// Set up stdin with user message (format depends on whether streaming is enabled)
+	var inputData string
+	if e.config.IsFeatureEnabled("THINKING_PROCESS") {
+		// For stream-json, wrap user message in JSON format
+		inputJSON := map[string]interface{}{
+			"type": "user",
+			"message": map[string]interface{}{
+				"role":    "user",
+				"content": userMessage,
+			},
+		}
+		inputBytes, err := json.Marshal(inputJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal streaming input: %w", err)
+		}
+		inputData = string(inputBytes)
+	} else {
+		// For regular JSON, use plain text
+		inputData = userMessage
+	}
+	cmd.Stdin = strings.NewReader(inputData)
 	
 	// Capture stdout and stderr
 	var stdout, stderr bytes.Buffer
@@ -208,18 +294,44 @@ Remember: You have full access to the machine's capabilities, but always priorit
 		return nil, enhancedErr
 	}
 	
-	// Parse JSON response
-	var response ClaudeCodeResponse
+	// Parse response based on format
 	responseBytes := stdout.Bytes()
-	if err := json.Unmarshal(responseBytes, &response); err != nil {
-		e.logger.Error("Failed to parse Claude Code response",
-			zap.Error(err),
-			zap.String("stdout", stdout.String()))
-		return nil, fmt.Errorf("failed to parse Claude Code response: %w", err)
-	}
+	var response ClaudeCodeResponse
 	
-	// Save raw response
-	response.LatestResponse = string(responseBytes)
+	if e.config.IsFeatureEnabled("THINKING_PROCESS") {
+		// Parse streaming JSON response
+		streamingResp, err := e.parseStreamingResponse(responseBytes)
+		if err != nil {
+			e.logger.Error("Failed to parse streaming Claude Code response",
+				zap.Error(err),
+				zap.String("stdout", stdout.String()))
+			return nil, fmt.Errorf("failed to parse streaming Claude Code response: %w", err)
+		}
+		
+		// Convert streaming response to regular response format
+		response = ClaudeCodeResponse{
+			Type:         "result",
+			Subtype:      "success",
+			IsError:      streamingResp.IsError,
+			Result:       streamingResp.Result,
+			SessionID:    streamingResp.SessionID,
+			TotalCostUSD: streamingResp.TotalCostUSD,
+			Usage:        streamingResp.Usage,
+			Error:        streamingResp.Error,
+			LatestResponse: string(responseBytes),
+		}
+	} else {
+		// Parse regular JSON response
+		if err := json.Unmarshal(responseBytes, &response); err != nil {
+			e.logger.Error("Failed to parse Claude Code response",
+				zap.Error(err),
+				zap.String("stdout", stdout.String()))
+			return nil, fmt.Errorf("failed to parse Claude Code response: %w", err)
+		}
+		
+		// Save raw response
+		response.LatestResponse = string(responseBytes)
+	}
 	
 	// Check for errors in response
 	if response.IsError {
@@ -642,4 +754,356 @@ The summary should be comprehensive enough that someone could read it and immedi
 		zap.Int("summary_length", len(response.Result)))
 
 	return response.Result, nil
+}
+
+// parseStreamingResponse parses streaming JSON output into a coherent response
+func (e *Executor) parseStreamingResponse(responseBytes []byte) (*StreamingResponse, error) {
+	lines := strings.Split(string(responseBytes), "\n")
+	
+	streamingResp := &StreamingResponse{
+		Events:    make([]StreamingEvent, 0),
+		ToolCalls: make([]ToolCall, 0),
+	}
+	
+	toolCallOrder := 0
+	
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		
+		var event StreamingEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			e.logger.Debug("Failed to parse streaming line", 
+				zap.Error(err), 
+				zap.String("line", line))
+			continue
+		}
+		
+		streamingResp.Events = append(streamingResp.Events, event)
+		
+		// Extract key information based on event type
+		switch event.Type {
+		case "system":
+			if event.SessionID != "" {
+				streamingResp.SessionID = event.SessionID
+			}
+			
+		case "assistant":
+			if event.Message != nil && event.Message.Content != nil {
+				for _, content := range event.Message.Content {
+					// Track tool calls for thinking process visibility
+					if content.Type == "tool_use" {
+						toolCall := ToolCall{
+							Name:  content.Name,
+							Input: content.Input,
+							Order: toolCallOrder,
+						}
+						streamingResp.ToolCalls = append(streamingResp.ToolCalls, toolCall)
+						toolCallOrder++
+					}
+				}
+				
+				// Extract usage information
+				if event.Message.Usage != nil {
+					streamingResp.Usage = *event.Message.Usage
+				}
+			}
+			
+		case "result":
+			if event.Result != nil {
+				streamingResp.Result = event.Result.Result
+				streamingResp.SessionID = event.Result.SessionID
+				streamingResp.TotalCostUSD = event.Result.TotalCostUSD
+				streamingResp.Usage = event.Result.Usage
+				streamingResp.IsError = event.Result.IsError
+			}
+		}
+	}
+	
+	return streamingResp, nil
+}
+
+// FormatToolCallForSlack formats a tool call for display in Slack
+func FormatToolCallForSlack(toolCall ToolCall) string {
+	switch toolCall.Name {
+	case "Read":
+		if filePath, ok := toolCall.Input["file_path"].(string); ok {
+			return fmt.Sprintf("🔍 _Reading %s..._", filePath)
+		}
+		return "🔍 _Reading file..._"
+		
+	case "Write":
+		if filePath, ok := toolCall.Input["file_path"].(string); ok {
+			return fmt.Sprintf("✏️ _Writing to %s..._", filePath)
+		}
+		return "✏️ _Writing file..._"
+		
+	case "Edit":
+		if filePath, ok := toolCall.Input["file_path"].(string); ok {
+			return fmt.Sprintf("✏️ _Editing %s..._", filePath)
+		}
+		return "✏️ _Editing file..._"
+		
+	case "Bash":
+		if command, ok := toolCall.Input["command"].(string); ok {
+			// Truncate long commands
+			if len(command) > 50 {
+				command = command[:47] + "..."
+			}
+			return fmt.Sprintf("⚙️ _Running `%s`..._", command)
+		}
+		return "⚙️ _Running command..._"
+		
+	case "LS":
+		if path, ok := toolCall.Input["path"].(string); ok {
+			return fmt.Sprintf("📁 _Listing %s..._", path)
+		}
+		return "📁 _Listing directory..._"
+		
+	case "Grep":
+		if pattern, ok := toolCall.Input["pattern"].(string); ok {
+			return fmt.Sprintf("🔎 _Searching for '%s'..._", pattern)
+		}
+		return "🔎 _Searching files..._"
+		
+	case "Glob":
+		if pattern, ok := toolCall.Input["pattern"].(string); ok {
+			return fmt.Sprintf("🔍 _Finding files matching '%s'..._", pattern)
+		}
+		return "🔍 _Finding files..._"
+		
+	case "WebFetch":
+		if url, ok := toolCall.Input["url"].(string); ok {
+			return fmt.Sprintf("🌐 _Fetching %s..._", url)
+		}
+		return "🌐 _Fetching web content..._"
+		
+	case "Task":
+		return "🤖 _Launching specialized agent..._"
+		
+	default:
+		return fmt.Sprintf("🔧 _Using %s tool..._", toolCall.Name)
+	}
+}
+
+// ExecuteClaudeCodeWithStreaming executes Claude Code with real-time streaming and callback for tool updates
+func (e *Executor) ExecuteClaudeCodeWithStreaming(ctx context.Context, userMessage string, sessionID string, workingDir string, allowedTools []string, isNewSession bool, permissionMode config.PermissionMode, onToolCall func(ToolCall)) (*ClaudeCodeResponse, error) {
+	// This method is only for streaming mode
+	if !e.config.IsFeatureEnabled("THINKING_PROCESS") {
+		// Fall back to regular execution
+		return e.ExecuteClaudeCode(ctx, userMessage, sessionID, workingDir, allowedTools, isNewSession, permissionMode)
+	}
+
+	// Prepare Claude Code CLI arguments for streaming
+	args := []string{
+		"--print",
+		"--model", "sonnet",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+	}
+	
+	// Add session flag
+	if sessionID != "" {
+		if isNewSession {
+			args = append(args, "--session-id", sessionID)
+		} else {
+			args = append(args, "--resume", sessionID)
+		}
+	}
+	
+	// Add allowed tools if specified
+	if len(allowedTools) > 0 {
+		args = append(args, "--allowedTools", strings.Join(allowedTools, ","))
+	}
+	
+	// Add permission mode
+	args = append(args, "--permission-mode", string(permissionMode))
+	
+	// Add image storage directory for file access
+	imageStorageDir := "/tmp/claude-slack-images"
+	args = append(args, "--add-dir", imageStorageDir)
+	
+	// Add system prompt for Slack bot context
+	systemPrompt := `You are Claude Code running in a Slack bot environment with full non-root access to the owner's machine. Your thought process and internal reasoning are not visible to users in Slack, so your final responses should be more verbose and explain how you accomplished tasks.
+
+CRITICAL WORKFLOW - Follow this process for EVERY project:
+
+1. **PLANNING FIRST** - Never write code immediately. Always start by:
+   - Understanding the full scope of what needs to be done
+   - Breaking down complex tasks into smaller steps
+   - Identifying dependencies and potential challenges
+   - Creating a clear implementation plan
+
+2. **THOROUGH RESEARCH** - Before implementing anything:
+   - Examine existing codebase patterns and conventions
+   - Research best practices for the specific technology/framework
+   - Understand the project structure and architecture
+   - Look for similar implementations or examples in the codebase
+
+3. **ASK QUESTIONS** - This is EXTREMELY IMPORTANT:
+   - If any requirement is unclear or ambiguous, ask for clarification
+   - Confirm your understanding of the task before proceeding
+   - Ask about preferences for implementation approaches
+   - Verify assumptions about expected behavior or outcomes
+   - The feedback loop is crucial - better to ask too many questions than make incorrect assumptions
+
+4. **VERBOSE EXPLANATIONS** - Since your thinking isn't visible:
+   - Explain your reasoning for technical decisions
+   - Describe the steps you're taking and why
+   - Share what you discovered during research
+   - Explain any trade-offs or alternative approaches considered
+   - Provide context for why you chose a particular solution
+
+Remember: You have full access to the machine's capabilities, but always prioritize understanding the task completely before taking action. Clear communication and thorough planning prevent costly mistakes and rework.
+
+**IMPORTANT: FORMAT FOR SLACK** - Always format your responses for optimal Slack display:
+- Use Slack formatting (*bold*, _italic_, ` + "`code`" + `) instead of markdown (**bold**, *italic*)
+- Use Slack code blocks with triple backticks for multi-line code
+- Use bullet points with • or - for lists
+- Use appropriate emojis for visual clarity
+- *Never use markdown headings (## text)* - use *bold text:* instead
+- Only use markdown formatting if explicitly requested by the user`
+	args = append(args, "--append-system-prompt", systemPrompt)
+	
+	// Create command with timeout
+	cmd := exec.CommandContext(ctx, e.claudeCodePath, args...)
+	cmd.Dir = workingDir
+	
+	// Set up stdin with JSON formatted user message
+	inputJSON := map[string]interface{}{
+		"type": "user",
+		"message": map[string]interface{}{
+			"role":    "user",
+			"content": userMessage,
+		},
+	}
+	inputBytes, err := json.Marshal(inputJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal streaming input: %w", err)
+	}
+	cmd.Stdin = strings.NewReader(string(inputBytes))
+	
+	// Create pipe for streaming stdout
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	
+	// Capture stderr
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	
+	// Log the execution
+	e.logger.Info("Executing Claude Code CLI with streaming",
+		zap.String("session_id", sessionID),
+		zap.String("working_dir", workingDir),
+		zap.Strings("allowed_tools", allowedTools),
+		zap.Bool("is_new_session", isNewSession))
+	
+	// Start command
+	start := time.Now()
+	err = cmd.Start()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start Claude Code CLI: %w", err)
+	}
+	
+	// Process streaming output
+	var responseLines []string
+	toolCallOrder := 0
+	
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		
+		responseLines = append(responseLines, line)
+		
+		// Parse each line as a streaming event
+		var event StreamingEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			e.logger.Debug("Failed to parse streaming line", 
+				zap.Error(err), 
+				zap.String("line", line))
+			continue
+		}
+		
+		// Check for tool calls and trigger callback
+		if event.Type == "assistant" && event.Message != nil && event.Message.Content != nil {
+			for _, content := range event.Message.Content {
+				if content.Type == "tool_use" && onToolCall != nil {
+					toolCall := ToolCall{
+						Name:  content.Name,
+						Input: content.Input,
+						Order: toolCallOrder,
+					}
+					onToolCall(toolCall)
+					toolCallOrder++
+				}
+			}
+		}
+	}
+	
+	// Wait for command to complete
+	err = cmd.Wait()
+	duration := time.Since(start)
+	
+	if err != nil {
+		stderrOutput := strings.TrimSpace(stderr.String())
+		e.logger.Error("Claude Code CLI streaming execution failed",
+			zap.Error(err),
+			zap.String("stderr", stderrOutput),
+			zap.Duration("duration", duration))
+		
+		debugInfo := map[string]interface{}{
+			"session_id":     sessionID,
+			"is_new_session": isNewSession,
+			"working_dir":    workingDir,
+			"args":          args,
+		}
+		enhancedErr := e.createEnhancedError(err, stderrOutput, duration, debugInfo)
+		return nil, enhancedErr
+	}
+	
+	// Parse complete streaming response
+	responseBytes := []byte(strings.Join(responseLines, "\n"))
+	streamingResp, err := e.parseStreamingResponse(responseBytes)
+	if err != nil {
+		e.logger.Error("Failed to parse complete streaming response",
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to parse streaming response: %w", err)
+	}
+	
+	// Convert to regular response format
+	response := &ClaudeCodeResponse{
+		Type:         "result",
+		Subtype:      "success",
+		IsError:      streamingResp.IsError,
+		Result:       streamingResp.Result,
+		SessionID:    streamingResp.SessionID,
+		TotalCostUSD: streamingResp.TotalCostUSD,
+		Usage:        streamingResp.Usage,
+		Error:        streamingResp.Error,
+		LatestResponse: string(responseBytes),
+	}
+	
+	// Check for errors
+	if response.IsError {
+		e.logger.Error("Claude Code returned error in streaming mode",
+			zap.String("error", response.Error))
+		return nil, fmt.Errorf("claude code error: %s", response.Error)
+	}
+	
+	e.logger.Debug("Claude Code streaming execution successful",
+		zap.String("session_id", response.SessionID),
+		zap.Float64("cost_usd", response.TotalCostUSD),
+		zap.Int("input_tokens", response.Usage.InputTokens),
+		zap.Int("output_tokens", response.Usage.OutputTokens),
+		zap.Duration("duration", duration))
+	
+	return response, nil
 }

@@ -78,6 +78,9 @@ type Config struct {
 	CommandTimeout   time.Duration
 	MaxOutputLength  int
 
+	// Feature flags
+	Features []string
+
 	// Database configuration
 	Database                DatabaseConfig
 	EnableDatabasePersistence bool
@@ -341,6 +344,15 @@ func Load() (*Config, error) {
 		cfg.AppVersion = val
 	}
 
+	// Load feature flags
+	if val := os.Getenv("FEATURES"); val != "" {
+		cfg.Features = strings.Split(val, ",")
+		// Trim whitespace from each feature
+		for i, feature := range cfg.Features {
+			cfg.Features[i] = strings.TrimSpace(feature)
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -433,6 +445,16 @@ func (c *Config) IsCommandAllowed(command string) bool {
 		}
 	}
 	
+	return false
+}
+
+// IsFeatureEnabled checks if a feature flag is enabled
+func (c *Config) IsFeatureEnabled(feature string) bool {
+	for _, enabledFeature := range c.Features {
+		if enabledFeature == feature {
+			return true
+		}
+	}
 	return false
 }
 

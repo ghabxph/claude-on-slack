@@ -1647,11 +1647,11 @@ func (s *Service) sendStartupNotification() {
 		time.Sleep(3 * time.Second)
 
 		changes := []string{
-			"Enhanced session management with interactive features",
-			"Smart path suggestions based on session history",
-			"Improved /session command with session listing",
-			"Path-based session switching with /session . <path>",
-			"Intelligent session selection for existing paths",
+			"🧠 Real-Time Thinking Process - See Claude's tool execution live (opt-in with FEATURES=THINKING_PROCESS)",
+			"🔍 Live Tool Updates - Watch Claude read files, run commands, and write code in real-time",
+			"✨ Enhanced Transparency - From simple 'Thinking...' to detailed step-by-step progress",
+			"🔄 Backwards Compatible - Existing behavior unchanged unless feature flag is enabled",
+			"⚙️ Stream-JSON Integration - Seamless parsing of Claude Code CLI streaming output",
 		}
 
 		if err := notifier.NotifyDeployment(changes); err != nil {

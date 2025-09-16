@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
@@ -34,21 +36,22 @@ import (
 
 // Service represents the main bot service
 type Service struct {
-	config         *config.Config
-	logger         *zap.Logger
-	dualLogger     *logging.DualLogger
-	slackAPI       *slack.Client
-	socketClient   *socketmode.Client
-	httpServer     *http.Server
-	authService    *auth.Service
-	sessionManager session.SessionManager
-	claudeExecutor *claude.Executor
-	fileDownloader *files.Downloader
-	fileCleanup    *files.CleanupService
-	stopCh         chan struct{}
-	wg             sync.WaitGroup
-	botUserID      string
-	startTime      time.Time
+	config           *config.Config
+	logger           *zap.Logger
+	dualLogger       *logging.DualLogger
+	slackAPI         *slack.Client
+	socketClient     *socketmode.Client
+	httpServer       *http.Server
+	authService      *auth.Service
+	sessionManager   session.SessionManager
+	claudeExecutor   *claude.Executor
+	memoryRepository *repository.MemoryRepository
+	fileDownloader   *files.Downloader
+	fileCleanup      *files.CleanupService
+	stopCh           chan struct{}
+	wg               sync.WaitGroup
+	botUserID        string
+	startTime        time.Time
 }
 
 // CommandHandler represents a command handler function
@@ -79,6 +82,9 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 	// Use database-backed session manager
 	sessionManager := session.NewDatabaseManager(cfg, logger, claudeExecutor, db)
 
+	// Initialize memory repository for dual-memory system
+	memoryRepository := repository.NewMemoryRepository(db, logger)
+
 	// Initialize file downloader
 	storageDir := "/tmp/claude-slack-images"
 	fileDownloader, err := files.NewDownloader(slackAPI, logger, storageDir, cfg.SlackBotToken)
@@ -91,18 +97,19 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 	dualLogger := logging.NewDualLogger(logger, slackAPI)
 
 	service := &Service{
-		config:         cfg,
-		logger:         logger,
-		dualLogger:     dualLogger,
-		slackAPI:       slackAPI,
-		socketClient:   socketClient,
-		authService:    authService,
-		sessionManager: sessionManager,
-		claudeExecutor: claudeExecutor,
-		fileDownloader: fileDownloader,
-		fileCleanup:    fileCleanup,
-		stopCh:         make(chan struct{}),
-		startTime:      time.Now(),
+		config:           cfg,
+		logger:           logger,
+		dualLogger:       dualLogger,
+		slackAPI:         slackAPI,
+		socketClient:     socketClient,
+		authService:      authService,
+		sessionManager:   sessionManager,
+		claudeExecutor:   claudeExecutor,
+		memoryRepository: memoryRepository,
+		fileDownloader:   fileDownloader,
+		fileCleanup:      fileCleanup,
+		stopCh:           make(chan struct{}),
+		startTime:        time.Now(),
 	}
 
 	// Register built-in commands
@@ -2120,6 +2127,11 @@ func (s *Service) processClaudeWithStreaming(ctx context.Context, userMessage, s
 		progressMsg := claude.FormatToolCallForSlack(toolCall)
 		lastProgressMessage = progressMsg
 		
+		// Record step in short-term memory (only if THINKING_PROCESS is enabled)
+		if s.config.IsFeatureEnabled("THINKING_PROCESS") {
+			s.recordStepInMemory(sessionID, toolCall)
+		}
+		
 		// Send each tool execution as a separate Slack message (synchronous to ensure immediate delivery)
 		_, _, err := s.slackAPI.PostMessage(channelID, slack.MsgOptionText(progressMsg, false))
 		if err != nil {
@@ -2152,4 +2164,109 @@ func (s *Service) processClaudeWithStreaming(ctx context.Context, userMessage, s
 		zap.String("last_tool", lastProgressMessage))
 	
 	return claudeResp.Result, claudeResp.SessionID, claudeResp.TotalCostUSD, claudeResp.LatestResponse, nil
+}
+
+// recordStepInMemory records a tool call step in short-term memory
+func (s *Service) recordStepInMemory(sessionID string, toolCall claude.ToolCall) {
+	// Get next step order
+	nextOrder, err := s.memoryRepository.GetNextStepOrder(sessionID)
+	if err != nil {
+		s.logger.Error("Failed to get next step order",
+			zap.Error(err),
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	// Convert tool input to JSON string
+	var toolInputJSON *string
+	if toolCall.Input != nil {
+		if inputBytes, err := json.Marshal(toolCall.Input); err == nil {
+			inputStr := string(inputBytes)
+			toolInputJSON = &inputStr
+		}
+	}
+
+	// Estimate tokens for this step (simple estimation for now)
+	inputTokens := s.estimateTokensForStep(toolCall)
+	
+	// Get current cumulative tokens and add this step's estimated tokens
+	currentCumulative, err := s.memoryRepository.GetCumulativeTokens(sessionID)
+	if err != nil {
+		s.logger.Warn("Failed to get cumulative tokens, starting from 0",
+			zap.Error(err),
+			zap.String("session_id", sessionID))
+		currentCumulative = 0
+	}
+	newCumulative := currentCumulative + inputTokens
+
+	// Create step record
+	step := &repository.ShortTermMemory{
+		StepID:           uuid.New().String(),
+		SessionID:        sessionID,
+		StepType:         "tool_call",
+		StepOrder:        nextOrder,
+		ToolName:         &toolCall.Name,
+		ToolInput:        toolInputJSON,
+		ThinkingContext:  &toolCall.Context,
+		InputTokens:      inputTokens,
+		OutputTokens:     0, // Will be updated when tool result is available
+		CumulativeTokens: newCumulative,
+	}
+
+	// Store step in short-term memory
+	if err := s.memoryRepository.CreateStep(step); err != nil {
+		s.logger.Error("Failed to record step in short-term memory",
+			zap.Error(err),
+			zap.String("session_id", sessionID),
+			zap.String("step_id", step.StepID),
+			zap.String("tool_name", toolCall.Name))
+		return
+	}
+
+	// Log token usage and check for approaching threshold
+	s.logger.Debug("Recorded step in short-term memory",
+		zap.String("session_id", sessionID),
+		zap.String("step_id", step.StepID),
+		zap.String("tool_name", toolCall.Name),
+		zap.Int("step_order", nextOrder),
+		zap.Int("input_tokens", inputTokens),
+		zap.Int("cumulative_tokens", newCumulative))
+
+	// Check if approaching compaction threshold (180k tokens)
+	if newCumulative >= 150000 { // Warn at 150k tokens
+		s.logger.Warn("Approaching token compaction threshold",
+			zap.String("session_id", sessionID),
+			zap.Int("cumulative_tokens", newCumulative),
+			zap.Int("threshold", 180000))
+	}
+}
+
+// estimateTokensForStep provides a simple token estimation for a tool call step
+func (s *Service) estimateTokensForStep(toolCall claude.ToolCall) int {
+	// Simple token estimation based on text length
+	// Rule of thumb: ~4 characters per token for English text
+	
+	tokenCount := 0
+	
+	// Count tokens from thinking context
+	if toolCall.Context != "" {
+		tokenCount += len(toolCall.Context) / 4
+	}
+	
+	// Count tokens from tool input
+	if toolCall.Input != nil {
+		if inputBytes, err := json.Marshal(toolCall.Input); err == nil {
+			tokenCount += len(inputBytes) / 4
+		}
+	}
+	
+	// Add base tokens for tool overhead (tool name, structure, etc.)
+	tokenCount += 50
+	
+	// Minimum token count
+	if tokenCount < 10 {
+		tokenCount = 10
+	}
+	
+	return tokenCount
 }

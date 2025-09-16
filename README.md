@@ -97,6 +97,22 @@ Upload any image and get instant AI analysis - perfect for debugging, technical 
 - 💬 **Conversational**: Just upload and ask questions - no special commands needed
 - 🔄 **Seamless Integration**: Combine image analysis with your ongoing coding and automation conversations
 
+### 🧠 **Real-Time Thinking Process in Action (v2.7.0)**
+
+See Claude's thought process live with the new `FEATURES=THINKING_PROCESS` feature - watch every tool execution in real-time!
+
+<img width="748" height="1708" alt="image" src="https://github.com/user-attachments/assets/b7c8b50f-de1c-43e8-aeb5-b490b500ea63" />
+
+*Real example: Watch Claude work through complex tasks with complete transparency - see file reads, command executions, code edits, and more as they happen!*
+
+**Real-Time Thinking Features:**
+- 🔍 **Live Tool Updates**: Watch Claude read files (`🔍 Reading main.go...`)
+- ⚙️ **Command Execution**: See commands run in real-time (`⚙️ Running go build...`)  
+- ✏️ **Code Changes**: View file edits as they happen (`✏️ Writing config.go...`)
+- 🔄 **Complete Transparency**: From "🤔 Thinking..." to step-by-step execution
+- 🚀 **Opt-In Feature**: Enable with `FEATURES=THINKING_PROCESS` environment variable
+- 📱 **Full Compatibility**: Works seamlessly on mobile and desktop Slack
+
 ## ⚠️ **Current Limitations & Cost Considerations**
 
 ### 🔗 **Dependency: Claude Code CLI**

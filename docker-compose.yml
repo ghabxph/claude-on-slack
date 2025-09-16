@@ -9,6 +9,7 @@ services:
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
       - ./migrations:/host_migrations:ro
+      - ./pg_hba.conf:/var/lib/postgresql/data/pg_hba.conf
     networks:
       - claude-network
     ports:

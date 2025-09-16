@@ -411,6 +411,44 @@ This project is open source and available under the [MIT License](LICENSE).
 
 ## 🆕 Latest Features
 
+### Real-Time Thinking Process Visibility (v2.7.0)
+
+Watch Claude work in real-time with transparent tool execution display:
+
+#### Key Features
+- **Live Tool Updates**: See Claude's progress as it reads files, runs commands, and writes code
+- **Opt-In Activation**: Enable with `FEATURES=THINKING_PROCESS` environment variable
+- **Backwards Compatible**: Existing behavior unchanged - traditional "🤔 Thinking..." unless enabled
+- **Rich Progress Display**: Custom emojis and descriptions for each tool type (🔍 Read, ⚙️ Bash, ✏️ Write, etc.)
+- **Non-Blocking Performance**: Real-time updates don't slow down Claude's execution
+
+#### User Experience Transformation
+**Before (Default):**
+```
+🤔 Thinking...
+[Final response appears]
+```
+
+**After (With THINKING_PROCESS enabled):**
+```
+🤔 Claude is thinking...
+🔍 Reading package.json...
+⚙️ Running npm install...
+✏️ Writing src/components/Button.tsx...
+🔍 Reading existing test files...
+✏️ Writing tests/Button.test.tsx...
+[Complete response with full context]
+```
+
+#### Setup
+Add to your `.env` file:
+```bash
+# Enable real-time thinking process visibility
+FEATURES=THINKING_PROCESS
+```
+
+No other configuration needed! The feature integrates seamlessly with Claude Code CLI's streaming JSON output.
+
 ### Image Processing Support (v2.1.0)
 
 Upload and analyze images directly in Slack conversations:

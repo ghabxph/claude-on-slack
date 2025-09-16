@@ -544,21 +544,24 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 		text = strings.Join(append([]string{text}, queuedMessages...), " ")
 	}
 
-	// Send "Thinking..." message immediately and capture for deletion
-	// Get current mode
-	currentMode, err := s.getPermissionModeForChannel(event.Channel, userSession.GetID())
-	if err != nil {
-		currentMode = config.PermissionModeDefault
-	}
-	
-	// Format Thinking message with Mode, Session, and Working Dir
-	thinkingMsg := fmt.Sprintf("🤔 _Thinking..._\n\n_• Mode: `%s`\n• Session: `%s`\n• Working Dir: `%s`_",
-		currentMode, userSession.GetID(), userSession.GetCurrentWorkDir())
-	
-	_, thinkingTimestamp, err := s.slackAPI.PostMessage(event.Channel, slack.MsgOptionText(thinkingMsg, false))
-	if err != nil {
-		s.logger.Error("Failed to send thinking message", zap.Error(err))
-		thinkingTimestamp = "" // Ensure it's empty if posting failed
+	// Send "Thinking..." message only if THINKING_PROCESS is disabled
+	var thinkingTimestamp string
+	if !s.config.IsFeatureEnabled("THINKING_PROCESS") {
+		// Get current mode
+		currentMode, err := s.getPermissionModeForChannel(event.Channel, userSession.GetID())
+		if err != nil {
+			currentMode = config.PermissionModeDefault
+		}
+		
+		// Format Thinking message with Mode, Session, and Working Dir
+		thinkingMsg := fmt.Sprintf("🤔 _Thinking..._\n\n_• Mode: `%s`\n• Session: `%s`\n• Working Dir: `%s`_",
+			currentMode, userSession.GetID(), userSession.GetCurrentWorkDir())
+		
+		_, thinkingTimestamp, err = s.slackAPI.PostMessage(event.Channel, slack.MsgOptionText(thinkingMsg, false))
+		if err != nil {
+			s.logger.Error("Failed to send thinking message", zap.Error(err))
+			thinkingTimestamp = "" // Ensure it's empty if posting failed
+		}
 	}
 
 	// Get allowed tools for this user
@@ -642,7 +645,7 @@ func (s *Service) processClaudeMessage(ctx context.Context, event *slackevents.M
 
 	if s.config.IsFeatureEnabled("THINKING_PROCESS") {
 		// Use streaming execution with real-time tool updates
-		response, newClaudeSessionID, cost, rawJSON, claudeErr = s.processClaudeWithStreaming(ctx, text, claudeSessionID, event.User, userSession.GetCurrentWorkDir(), allowedTools, isNewSession, permMode, event.Channel, thinkingTimestamp)
+		response, newClaudeSessionID, cost, rawJSON, claudeErr = s.processClaudeWithStreaming(ctx, text, claudeSessionID, event.User, userSession.GetCurrentWorkDir(), allowedTools, isNewSession, permMode, event.Channel)
 	} else {
 		// Use regular execution
 		response, newClaudeSessionID, cost, rawJSON, claudeErr = s.claudeExecutor.ProcessClaudeCodeRequest(ctx, text, claudeSessionID, event.User, userSession.GetCurrentWorkDir(), allowedTools, isNewSession, permMode)
@@ -2106,7 +2109,7 @@ func (s *Service) handleDeleteSessionCommand(userID, channelID, text string) str
 }
 
 // processClaudeWithStreaming processes Claude with real-time tool execution updates
-func (s *Service) processClaudeWithStreaming(ctx context.Context, userMessage, sessionID, userID, workingDir string, allowedTools []string, isNewSession bool, permMode config.PermissionMode, channelID, thinkingTimestamp string) (string, string, float64, string, error) {
+func (s *Service) processClaudeWithStreaming(ctx context.Context, userMessage, sessionID, userID, workingDir string, allowedTools []string, isNewSession bool, permMode config.PermissionMode, channelID string) (string, string, float64, string, error) {
 	
 	// Track tool executions for progress updates
 	toolCount := 0
@@ -2118,23 +2121,15 @@ func (s *Service) processClaudeWithStreaming(ctx context.Context, userMessage, s
 		progressMsg := claude.FormatToolCallForSlack(toolCall)
 		lastProgressMessage = progressMsg
 		
-		// Update the thinking message with current tool execution
-		currentMode, _ := s.getPermissionModeForChannel(channelID, sessionID)
-		toolProgressMsg := fmt.Sprintf("🤔 _Claude is thinking..._\n\n_• Mode: `%s`\n• Session: `%s`\n• Working Dir: `%s`_\n\n%s",
-			currentMode, sessionID, workingDir, progressMsg)
-		
-		// Update the existing thinking message (non-blocking)
-		go func() {
-			if thinkingTimestamp != "" {
-				_, _, _, err := s.slackAPI.UpdateMessage(channelID, thinkingTimestamp, slack.MsgOptionText(toolProgressMsg, false))
-				if err != nil {
-					s.logger.Debug("Failed to update thinking message with tool progress", 
-						zap.Error(err),
-						zap.String("channel", channelID),
-						zap.String("timestamp", thinkingTimestamp))
-				}
-			}
-		}()
+		// Send each tool execution as a separate Slack message (synchronous to ensure immediate delivery)
+		_, _, err := s.slackAPI.PostMessage(channelID, slack.MsgOptionText(progressMsg, false))
+		if err != nil {
+			s.logger.Debug("Failed to send tool progress message", 
+				zap.Error(err),
+				zap.String("channel", channelID),
+				zap.String("tool", toolCall.Name),
+				zap.String("message", progressMsg))
+		}
 		
 		s.logger.Info("Tool execution progress",
 			zap.String("tool", toolCall.Name),

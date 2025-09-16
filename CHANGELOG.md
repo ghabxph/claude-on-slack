@@ -17,6 +17,8 @@ All notable changes to claude-on-slack will be documented in this file.
 - **Streaming Parser**: Real-time JSON event parsing with tool call extraction
 - **Dual Execution Modes**: Automatic fallback to regular JSON when streaming is disabled
 - **Tool Progress Callbacks**: Live callback system for real-time Slack message updates
+- **Enhanced Text Collection**: Improved streaming response text aggregation for complete final responses
+- **Debug Logging**: Comprehensive tool call callback logging for troubleshooting
 - **Error Handling**: Graceful degradation and comprehensive logging for debugging
 
 ### User Experience

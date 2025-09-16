@@ -40,11 +40,11 @@ func (n *DeploymentNotifier) FormatDeploymentMessage(version string, changes []s
 			message += fmt.Sprintf("• %s\n", change)
 		}
 	} else {
-		message += "• 🛠️ **Database Query Robustness** - Replaced SELECT * with explicit columns for schema safety\n"
-		message += "• 🔧 **SQL Scan Error Fix** - Resolved critical column order mismatch in child session queries\n"
-		message += "• 🚀 **Migration-Proof Design** - Future database changes won't break existing queries\n"
-		message += "• 🎯 **Type Safety** - Eliminated runtime SQL scan errors from column/field misalignment\n"
-		message += "• ⚡ **Performance & Maintainability** - Explicit column selection improves query optimization\n"
+		message += "• 🧠 **Real-Time Thinking Process** - See Claude's tool execution live (opt-in with `FEATURES=THINKING_PROCESS`)\n"
+		message += "• 🔍 **Live Tool Updates** - Watch Claude read files, run commands, and write code in real-time\n"
+		message += "• ✨ **Enhanced Transparency** - From simple 'Thinking...' to detailed step-by-step progress\n"
+		message += "• 🔄 **Backwards Compatible** - Existing behavior unchanged unless feature flag is enabled\n"
+		message += "• ⚙️ **Stream-JSON Integration** - Seamless parsing of Claude Code CLI streaming output\n"
 	}
 	
 	message += "\n📋 *Full details*: See <https://github.com/ghabxph/claude-on-slack/blob/main/CHANGELOG.md|CHANGELOG.md>\n"

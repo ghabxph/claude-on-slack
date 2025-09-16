@@ -60,11 +60,13 @@ type StreamingMessage struct {
 
 // StreamingContent represents content within a streaming message
 type StreamingContent struct {
-	Type    string                 `json:"type"`
-	Text    string                 `json:"text,omitempty"`
-	ID      string                 `json:"id,omitempty"`
-	Name    string                 `json:"name,omitempty"`
-	Input   map[string]interface{} `json:"input,omitempty"`
+	Type      string                 `json:"type"`
+	Text      string                 `json:"text,omitempty"`
+	ID        string                 `json:"id,omitempty"`
+	Name      string                 `json:"name,omitempty"`
+	Input     map[string]interface{} `json:"input,omitempty"`
+	ToolUseID string                 `json:"tool_use_id,omitempty"`
+	Content   string                 `json:"content,omitempty"`
 }
 
 // StreamingResult represents the final result in streaming mode
@@ -803,6 +805,15 @@ func (e *Executor) parseStreamingResponse(responseBytes []byte) (*StreamingRespo
 						streamingResp.ToolCalls = append(streamingResp.ToolCalls, toolCall)
 						toolCallOrder++
 					}
+					
+					// Collect text content for final response
+					if content.Type == "text" && content.Text != "" {
+						if streamingResp.Result != "" {
+							streamingResp.Result += "\n" + content.Text
+						} else {
+							streamingResp.Result = content.Text
+						}
+					}
 				}
 				
 				// Extract usage information
@@ -813,7 +824,10 @@ func (e *Executor) parseStreamingResponse(responseBytes []byte) (*StreamingRespo
 			
 		case "result":
 			if event.Result != nil {
-				streamingResp.Result = event.Result.Result
+				// Only overwrite Result if we haven't collected text content yet
+				if streamingResp.Result == "" && event.Result.Result != "" {
+					streamingResp.Result = event.Result.Result
+				}
 				streamingResp.SessionID = event.Result.SessionID
 				streamingResp.TotalCostUSD = event.Result.TotalCostUSD
 				streamingResp.Usage = event.Result.Usage
@@ -882,6 +896,22 @@ func FormatToolCallForSlack(toolCall ToolCall) string {
 		
 	case "Task":
 		return "🤖 _Launching specialized agent..._"
+		
+	case "ToolResult":
+		// Extract the content for tool result display
+		if content, ok := toolCall.Input["content"].(string); ok {
+			// Truncate very long outputs for readability
+			if len(content) > 200 {
+				content = content[:197] + "..."
+			}
+			// Show first line if multiline
+			lines := strings.Split(content, "\n")
+			if len(lines) > 1 {
+				return fmt.Sprintf("✅ _%s_ (+ %d more lines)", lines[0], len(lines)-1)
+			}
+			return fmt.Sprintf("✅ _%s_", content)
+		}
+		return "✅ _Tool completed_"
 		
 	default:
 		return fmt.Sprintf("🔧 _Using %s tool..._", toolCall.Name)
@@ -1036,12 +1066,37 @@ Remember: You have full access to the machine's capabilities, but always priorit
 		if event.Type == "assistant" && event.Message != nil && event.Message.Content != nil {
 			for _, content := range event.Message.Content {
 				if content.Type == "tool_use" && onToolCall != nil {
+					e.logger.Debug("Triggering tool call callback",
+						zap.String("tool", content.Name),
+						zap.Int("order", toolCallOrder),
+						zap.String("event_line", line))
+					
 					toolCall := ToolCall{
 						Name:  content.Name,
 						Input: content.Input,
 						Order: toolCallOrder,
 					}
 					onToolCall(toolCall)
+					toolCallOrder++
+				}
+			}
+		}
+		
+		// Check for tool results and trigger callback
+		if event.Type == "user" && event.Message != nil && event.Message.Content != nil {
+			for _, content := range event.Message.Content {
+				if content.Type == "tool_result" && onToolCall != nil {
+					e.logger.Debug("Triggering tool result callback",
+						zap.String("tool_use_id", content.ToolUseID),
+						zap.String("content_length", fmt.Sprintf("%d", len(content.Content))),
+						zap.String("event_line", line))
+					
+					toolResult := ToolCall{
+						Name:   "ToolResult", // Special name for tool results
+						Input:  map[string]interface{}{"tool_use_id": content.ToolUseID, "content": content.Content},
+						Order:  toolCallOrder,
+					}
+					onToolCall(toolResult)
 					toolCallOrder++
 				}
 			}

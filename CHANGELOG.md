@@ -2,7 +2,7 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
-## [2.7.0] - 2025-01-16
+## [2.7.0] - 2025-09-16
 
 ### Added - Real-Time Thinking Process Visibility 🧠✨
 - **THINKING_PROCESS Feature Flag**: New `FEATURES=THINKING_PROCESS` environment variable to enable Claude's thinking process visibility
@@ -26,6 +26,12 @@ All notable changes to claude-on-slack will be documented in this file.
 - **With THINKING_PROCESS**: `🤔 Claude is thinking...` → `🔍 Reading main.go...` → `⚙️ Running go build...` → `✏️ Writing config.go...` → Final response
 - **Transparency**: Users can now see exactly what Claude is doing step-by-step
 - **Engagement**: More interactive and engaging AI experience with visible "thinking"
+
+### Fixed - Deployment Notification System
+- **Corrected Startup Messages**: Fixed hardcoded deployment notifications to reflect v2.7.0 features instead of outdated v2.6.x session management content
+- **Dead Code Cleanup**: Removed unused fallback deployment message system that was never executed
+- **Single Source of Truth**: Deployment messages now come from one location (`internal/bot/service.go`) eliminating confusion
+
 
 ## [2.6.3] - 2025-08-31
 

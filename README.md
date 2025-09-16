@@ -101,9 +101,7 @@ Upload any image and get instant AI analysis - perfect for debugging, technical 
 
 See Claude's thought process live with the new `FEATURES=THINKING_PROCESS` feature - watch every tool execution in real-time!
 
-<!-- IMAGE_PLACEHOLDER_REAL_TIME_THINKING_PROCESS -->
-*Add screenshot showing the real-time thinking process with tool execution visibility*
-<!-- /IMAGE_PLACEHOLDER_REAL_TIME_THINKING_PROCESS -->
+<img width="748" height="1708" alt="image" src="https://github.com/user-attachments/assets/b7c8b50f-de1c-43e8-aeb5-b490b500ea63" />
 
 *Real example: Watch Claude work through complex tasks with complete transparency - see file reads, command executions, code edits, and more as they happen!*
 

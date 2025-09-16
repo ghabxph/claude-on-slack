@@ -1646,11 +1646,11 @@ func (s *Service) sendStartupNotification() {
 		time.Sleep(3 * time.Second)
 
 		changes := []string{
-			"🧠 Real-Time Thinking Process - See Claude's tool execution live (opt-in with FEATURES=THINKING_PROCESS)",
-			"🔍 Live Tool Updates - Watch Claude read files, run commands, and write code in real-time",
-			"✨ Enhanced Transparency - From simple 'Thinking...' to detailed step-by-step progress",
-			"🔄 Backwards Compatible - Existing behavior unchanged unless feature flag is enabled",
-			"🏗️ Version Consolidation - Single source of truth for version in config.AppVersion",
+			"🧠⚙️ Contextual Tool Messages - See the thinking context that led to each tool call",
+			"💭 Enhanced Understanding - From generic 'Reading file...' to 'I need to check configuration' → 'Reading config.go...'",
+			"🚀 Transparent Problem-Solving - Understand Claude's step-by-step reasoning process",
+			"📚 Educational Experience - Learn how AI approaches complex technical problems",
+			"🔄 Seamless Integration - Works alongside existing THINKING_PROCESS feature",
 		}
 
 		if err := notifier.NotifyDeployment(s.config.AppVersion, changes); err != nil {

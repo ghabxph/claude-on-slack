@@ -2,6 +2,29 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.8.0] - 2025-09-16
+
+### Enhanced - Contextual Tool Messages 🧠⚙️
+- **Contextual Tool Display**: Tool messages now show the thinking context that led to each tool call, making Claude's reasoning process transparent
+- **Intelligent Context Capture**: Automatically captures relevant thinking text before each tool call (truncated to 200 chars for readability)
+- **Enhanced User Experience**: Instead of generic "Reading file" messages, see "I need to check the current configuration" → "🔍 Reading config.go..."
+- **Smart Text Processing**: Advanced parsing to extract meaningful context while filtering out formatting artifacts
+- **Real-Time Reasoning**: Users can now understand not just what Claude is doing, but *why* it's taking each specific action
+
+### Technical Implementation
+- **Enhanced ToolCall Structure**: Added `Context` field to capture thinking text before tool execution
+- **Streaming Parser Enhancement**: Modified JSON streaming parser to associate thinking content with subsequent tool calls
+- **Context Extraction**: Intelligent text processing to extract meaningful context while avoiding repetitive or formatting text
+- **Slack Formatting**: Contextual information properly formatted for optimal Slack display with emoji indicators
+- **Debug Logging**: Comprehensive logging for context capture and tool call association for troubleshooting
+
+### User Experience Transformation
+- **Before**: `🔍 Reading main.go...` (generic)
+- **After**: `I need to check the current configuration` → `🔍 Reading main.go...` (contextual)
+- **Transparency**: Users understand the reasoning behind each tool call
+- **Learning**: Observe Claude's problem-solving approach step-by-step
+- **Engagement**: More intuitive and educational AI interaction experience
+
 ## [2.7.0] - 2025-09-16
 
 ### Added - Real-Time Thinking Process Visibility 🧠✨

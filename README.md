@@ -113,6 +113,39 @@ See Claude's thought process live with the new `FEATURES=THINKING_PROCESS` featu
 - 🚀 **Opt-In Feature**: Enable with `FEATURES=THINKING_PROCESS` environment variable
 - 📱 **Full Compatibility**: Works seamlessly on mobile and desktop Slack
 
+### 🧠⚙️ **Contextual Tool Messages (v2.8.0)**
+
+Now see not just *what* Claude is doing, but *why* it's doing each action! The new contextual tool messages feature shows Claude's reasoning behind every tool call.
+
+**Enhanced Understanding Features (NEW):**
+- 💭 **Contextual Reasoning**: See the thinking that led to each tool call
+- 🔍 **Before**: `🔍 Reading main.go...` (generic)
+- 🔍 **After**: `I need to check the current configuration` → `🔍 Reading main.go...` (contextual)
+- 🚀 **Transparent Problem-Solving**: Understand Claude's step-by-step reasoning process
+- 📚 **Educational Experience**: Learn how AI approaches complex technical problems
+- 🎯 **Intelligent Context**: 200-character context snippets for optimal readability
+
+**User Experience Transformation:**
+```
+Before (v2.7.0):
+🤔 Claude is thinking...
+🔍 Reading config.go...
+⚙️ Running go build...
+✏️ Writing utils.ts...
+
+After (v2.8.0):
+🤔 Claude is thinking...
+Let me check the current app configuration → 🔍 Reading config.go...
+Now I'll test if the changes compile → ⚙️ Running go build...
+I need to add the new utility functions → ✏️ Writing utils.ts...
+```
+
+**Technical Innovation:**
+- **Smart Context Capture**: Automatically extracts relevant thinking text before each tool call
+- **Intelligent Filtering**: Avoids repetitive text while preserving meaningful context
+- **Real-Time Association**: Links thinking content to corresponding tool executions
+- **Seamless Integration**: Works alongside existing THINKING_PROCESS feature flag
+
 ## ⚠️ **Current Limitations & Cost Considerations**
 
 ### 🔗 **Dependency: Claude Code CLI**

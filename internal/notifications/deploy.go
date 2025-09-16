@@ -6,8 +6,6 @@ import (
 
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
-
-	"github.com/ghabxph/claude-on-slack/internal/version"
 )
 
 type DeploymentNotifier struct {
@@ -24,8 +22,8 @@ func NewDeploymentNotifier(slackClient *slack.Client, channels []string, logger 
 	}
 }
 
-func (n *DeploymentNotifier) NotifyDeployment(changes []string) error {
-	message := n.FormatDeploymentMessage(version.GetVersion(), changes)
+func (n *DeploymentNotifier) NotifyDeployment(version string, changes []string) error {
+	message := n.FormatDeploymentMessage(version, changes)
 	
 	return n.SendConcurrentNotifications(message)
 }

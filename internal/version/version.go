@@ -3,27 +3,22 @@ package version
 import "time"
 
 const (
-	Version   = "2.7.0"
 	BuildTime = "development"  // Set during build
 	GitHash   = ""             // Set during build
 )
 
-func GetVersionInfo() map[string]string {
+func GetVersionInfo(appVersion string) map[string]string {
 	return map[string]string{
-		"version":    Version,
+		"version":    appVersion,
 		"build_time": BuildTime,
 		"git_hash":   GitHash,
 		"timestamp":  time.Now().Format(time.RFC3339),
 	}
 }
 
-func GetVersion() string {
-	return Version
-}
-
-func GetBuildInfo() string {
+func GetBuildInfo(appVersion string) string {
 	if BuildTime == "development" {
-		return Version + "-dev"
+		return appVersion + "-dev"
 	}
-	return Version + " (built " + BuildTime + ")"
+	return appVersion + " (built " + BuildTime + ")"
 }

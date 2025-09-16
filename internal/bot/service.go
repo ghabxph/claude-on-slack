@@ -30,7 +30,6 @@ import (
 	"github.com/ghabxph/claude-on-slack/internal/notifications"
 	"github.com/ghabxph/claude-on-slack/internal/repository"
 	"github.com/ghabxph/claude-on-slack/internal/session"
-	"github.com/ghabxph/claude-on-slack/internal/version"
 )
 
 // Service represents the main bot service
@@ -115,7 +114,7 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 // Start starts the bot service
 func (s *Service) Start(ctx context.Context) error {
 	s.logger.Info("Starting Claude on Slack bot",
-		zap.String("version", version.GetVersion()),
+		zap.String("version", s.config.AppVersion),
 		zap.String("bot_name", s.config.BotName),
 		zap.String("command_prefix", s.config.CommandPrefix))
 
@@ -1654,7 +1653,7 @@ func (s *Service) sendStartupNotification() {
 			"⚙️ Stream-JSON Integration - Seamless parsing of Claude Code CLI streaming output",
 		}
 
-		if err := notifier.NotifyDeployment(changes); err != nil {
+		if err := notifier.NotifyDeployment(s.config.AppVersion, changes); err != nil {
 			s.logger.Error("Failed to send startup notification", zap.Error(err))
 		} else {
 			s.logger.Info("Startup notification sent successfully")

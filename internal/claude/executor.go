@@ -862,10 +862,7 @@ func FormatToolCallForSlack(toolCall ToolCall) string {
 		
 	case "Bash":
 		if command, ok := toolCall.Input["command"].(string); ok {
-			// Truncate long commands
-			if len(command) > 50 {
-				command = command[:47] + "..."
-			}
+			// Don't truncate commands - users need to see the full command
 			return fmt.Sprintf("⚙️ _Running `%s`..._", command)
 		}
 		return "⚙️ _Running command..._"
@@ -900,21 +897,326 @@ func FormatToolCallForSlack(toolCall ToolCall) string {
 	case "ToolResult":
 		// Extract the content for tool result display
 		if content, ok := toolCall.Input["content"].(string); ok {
-			// Truncate very long outputs for readability
-			if len(content) > 200 {
-				content = content[:197] + "..."
-			}
-			// Show first line if multiline
-			lines := strings.Split(content, "\n")
-			if len(lines) > 1 {
-				return fmt.Sprintf("✅ _%s_ (+ %d more lines)", lines[0], len(lines)-1)
-			}
-			return fmt.Sprintf("✅ _%s_", content)
+			return formatToolResultContent(content)
 		}
 		return "✅ _Tool completed_"
 		
 	default:
 		return fmt.Sprintf("🔧 _Using %s tool..._", toolCall.Name)
+	}
+}
+
+// formatToolResultContent formats tool result content for Slack display
+func formatToolResultContent(content string) string {
+	// Handle different types of tool results
+	content = strings.TrimSpace(content)
+	
+	// Check for file content with line numbers (typical Read tool output)
+	if strings.Contains(content, "→") && (strings.Contains(content, "1→") || strings.Contains(content, "2→") || strings.Contains(content, "3→")) {
+		return formatFileContent(content)
+	}
+	
+	// Check for file update confirmations (Edit/Write tool output)
+	if strings.Contains(content, "has been updated") || strings.Contains(content, "created successfully") {
+		return formatFileUpdateResult(content)
+	}
+	
+	// Check for error messages
+	if strings.Contains(content, "<tool_use_error>") || strings.Contains(content, "error") {
+		return formatErrorResult(content)
+	}
+	
+	// Check for command output (Bash tool results)
+	if len(strings.Split(content, "\n")) > 1 && !strings.Contains(content, "→") {
+		return formatCommandOutput(content)
+	}
+	
+	// Check if it looks like line-numbered content that wasn't caught above
+	if strings.Contains(content, "→") {
+		return formatFileContent(content)
+	}
+	
+	// Default formatting for simple results - use code block if it looks like code
+	if looksLikeCode(content) {
+		lines := strings.Split(strings.TrimSpace(content), "\n")
+		if len(lines) == 1 {
+			if len(content) > 400 {
+				content = content[:397] + "..."
+			}
+			return fmt.Sprintf("✅ Result:\n```\n%s\n```", content)
+		}
+		// Multiple lines
+		linesToShow := len(lines)
+		if linesToShow > 20 {
+			linesToShow = 20
+		}
+		
+		codeBlock := ""
+		for i := 0; i < linesToShow; i++ {
+			line := lines[i]
+			// Cap each line at 400 characters to prevent Slack display issues
+			if len(line) > 400 {
+				line = line[:397] + "..."
+			}
+			codeBlock += line + "\n"
+		}
+		
+		if len(lines) > 20 {
+			return fmt.Sprintf("✅ Result:\n```\n%s```\n_(+ %d more lines)_", codeBlock, len(lines)-20)
+		} else {
+			return fmt.Sprintf("✅ Result:\n```\n%s```", codeBlock)
+		}
+	}
+	
+	// Plain text result
+	if len(content) > 100 {
+		content = content[:97] + "..."
+	}
+	return fmt.Sprintf("✅ _%s_", content)
+}
+
+// looksLikeCode determines if content should be displayed in a code block
+func looksLikeCode(content string) bool {
+	content = strings.TrimSpace(content)
+	
+	// Check for common code patterns
+	codePatterns := []string{
+		"message +=", "package ", "import ", "func ", "def ", "class ",
+		"if ", "for ", "while ", "return ", "var ", "const ", "let ",
+		"{", "}", "(", ")", "[", "]", ";", "=", ":", "->", "=>",
+		"git ", "npm ", "go ", "python ", "node ", "curl ", "ls ", "cd ",
+	}
+	
+	lowerContent := strings.ToLower(content)
+	for _, pattern := range codePatterns {
+		if strings.Contains(lowerContent, pattern) {
+			return true
+		}
+	}
+	
+	// Check if it has multiple lines with indentation or special characters
+	lines := strings.Split(content, "\n")
+	if len(lines) > 1 {
+		for _, line := range lines {
+			if strings.HasPrefix(line, "  ") || strings.HasPrefix(line, "\t") {
+				return true
+			}
+			if strings.Contains(line, "=") || strings.Contains(line, "{") || strings.Contains(line, "}") {
+				return true
+			}
+		}
+	}
+	
+	return false
+}
+
+// formatFileContent formats file content with syntax highlighting
+func formatFileContent(content string) string {
+	lines := strings.Split(content, "\n")
+	codeLines := []string{}
+	
+	// Extract code lines, preserving line numbers when available
+	for _, line := range lines {
+		if strings.Contains(line, "→") {
+			// Keep the line number but clean up the formatting
+			parts := strings.SplitN(line, "→", 2)
+			if len(parts) > 1 {
+				// Extract line number and clean it up
+				lineNumPart := strings.TrimSpace(parts[0])
+				codePart := parts[1]
+				
+				// Format as "lineNum: code" for better display
+				formattedLine := fmt.Sprintf("%s: %s", lineNumPart, codePart)
+				codeLines = append(codeLines, formattedLine)
+			}
+		}
+	}
+	
+	if len(codeLines) == 0 {
+		return "✅ _File read_"
+	}
+	
+	// Show preview of file content
+	if len(codeLines) == 1 {
+		code := strings.TrimSpace(codeLines[0])
+		// Cap single line at 400 characters to prevent Slack display issues
+		if len(code) > 400 {
+			code = code[:397] + "..."
+		}
+		return fmt.Sprintf("✅ Code preview:\n```\n%s\n```", code)
+	}
+	
+	// Multiple lines - show first 20 lines in code block
+	linesToShow := len(codeLines)
+	if linesToShow > 20 {
+		linesToShow = 20
+	}
+	
+	codeBlock := ""
+	for i := 0; i < linesToShow; i++ {
+		line := strings.TrimSpace(codeLines[i])
+		// Cap each line at 400 characters to prevent Slack display issues
+		if len(line) > 400 {
+			line = line[:397] + "..."
+		}
+		codeBlock += line + "\n"
+	}
+	
+	if len(codeLines) > 20 {
+		return fmt.Sprintf("✅ Code preview:\n```\n%s```\n_(+ %d more lines)_", codeBlock, len(codeLines)-20)
+	} else {
+		return fmt.Sprintf("✅ Code preview:\n```\n%s```", codeBlock)
+	}
+}
+
+// formatFileUpdateResult formats file update/creation confirmations
+func formatFileUpdateResult(content string) string {
+	// Extract filename if possible
+	if strings.Contains(content, "has been updated") {
+		if strings.Contains(content, "Here's the result") {
+			// This means it includes the updated content - show it
+			return formatFileUpdateWithContent(content)
+		}
+		return "✅ _File updated successfully_"
+	}
+	
+	if strings.Contains(content, "created successfully") {
+		return "✅ _File created successfully_"
+	}
+	
+	return "✅ _Operation completed_"
+}
+
+// formatFileUpdateWithContent formats file updates that include the new content
+func formatFileUpdateWithContent(content string) string {
+	lines := strings.Split(content, "\n")
+	codeLines := []string{}
+	
+	// Find the code content after "Here's the result of running `cat -n`"
+	inCodeSection := false
+	for _, line := range lines {
+		if strings.Contains(line, "cat -n") {
+			inCodeSection = true
+			continue
+		}
+		if inCodeSection && strings.Contains(line, "→") {
+			parts := strings.SplitN(line, "→", 2)
+			if len(parts) > 1 {
+				// Extract line number and clean it up
+				lineNumPart := strings.TrimSpace(parts[0])
+				codePart := parts[1]
+				
+				// Format as "lineNum: code" for better display
+				formattedLine := fmt.Sprintf("%s: %s", lineNumPart, codePart)
+				codeLines = append(codeLines, formattedLine)
+			}
+		}
+	}
+	
+	if len(codeLines) == 0 {
+		return "✅ _File updated_"
+	}
+	
+	// Show the updated content preview
+	if len(codeLines) == 1 {
+		code := strings.TrimSpace(codeLines[0])
+		// Cap single line at 400 characters to prevent Slack display issues
+		if len(code) > 400 {
+			code = code[:397] + "..."
+		}
+		return fmt.Sprintf("✅ File updated:\n```\n%s\n```", code)
+	}
+	
+	// Multiple lines - show first 20 lines in code block
+	linesToShow := len(codeLines)
+	if linesToShow > 20 {
+		linesToShow = 20
+	}
+	
+	codeBlock := ""
+	for i := 0; i < linesToShow; i++ {
+		line := strings.TrimSpace(codeLines[i])
+		// Cap each line at 400 characters to prevent Slack display issues
+		if len(line) > 400 {
+			line = line[:397] + "..."
+		}
+		codeBlock += line + "\n"
+	}
+	
+	if len(codeLines) > 20 {
+		return fmt.Sprintf("✅ File updated:\n```\n%s```\n_(+ %d more lines)_", codeBlock, len(codeLines)-20)
+	} else {
+		return fmt.Sprintf("✅ File updated:\n```\n%s```", codeBlock)
+	}
+}
+
+// formatErrorResult formats error messages
+func formatErrorResult(content string) string {
+	// Extract error from tool_use_error tags
+	if strings.Contains(content, "<tool_use_error>") {
+		start := strings.Index(content, "<tool_use_error>")
+		end := strings.Index(content, "</tool_use_error>")
+		if start != -1 && end != -1 {
+			errorMsg := content[start+16 : end]
+			if len(errorMsg) > 60 {
+				errorMsg = errorMsg[:57] + "..."
+			}
+			return fmt.Sprintf("❌ _%s_", errorMsg)
+		}
+	}
+	
+	// Handle other error patterns
+	if len(content) > 60 {
+		content = content[:57] + "..."
+	}
+	return fmt.Sprintf("❌ _%s_", content)
+}
+
+// formatCommandOutput formats command execution results
+func formatCommandOutput(content string) string {
+	lines := strings.Split(content, "\n")
+	nonEmptyLines := []string{}
+	
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			nonEmptyLines = append(nonEmptyLines, line)
+		}
+	}
+	
+	if len(nonEmptyLines) == 0 {
+		return "✅ _Command completed (no output)_"
+	}
+	
+	if len(nonEmptyLines) == 1 {
+		output := nonEmptyLines[0]
+		// Cap single line at 400 characters to prevent Slack display issues
+		if len(output) > 400 {
+			output = output[:397] + "..."
+		}
+		return fmt.Sprintf("✅ Command output:\n```\n%s\n```", output)
+	}
+	
+	// Multiple lines - show first 20 lines in code block
+	linesToShow := len(nonEmptyLines)
+	if linesToShow > 20 {
+		linesToShow = 20
+	}
+	
+	outputBlock := ""
+	for i := 0; i < linesToShow; i++ {
+		line := nonEmptyLines[i]
+		// Cap each line at 400 characters to prevent Slack display issues
+		if len(line) > 400 {
+			line = line[:397] + "..."
+		}
+		outputBlock += line + "\n"
+	}
+	
+	if len(nonEmptyLines) > 20 {
+		return fmt.Sprintf("✅ Command output:\n```\n%s```\n_(+ %d more lines)_", outputBlock, len(nonEmptyLines)-20)
+	} else {
+		return fmt.Sprintf("✅ Command output:\n```\n%s```", outputBlock)
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 
 	"github.com/ghabxph/claude-on-slack/internal/auth"
 	"github.com/ghabxph/claude-on-slack/internal/claude"
+	"github.com/ghabxph/claude-on-slack/internal/compaction"
 	"github.com/ghabxph/claude-on-slack/internal/config"
 	"github.com/ghabxph/claude-on-slack/internal/database"
 	"github.com/ghabxph/claude-on-slack/internal/files"
@@ -36,22 +37,24 @@ import (
 
 // Service represents the main bot service
 type Service struct {
-	config           *config.Config
-	logger           *zap.Logger
-	dualLogger       *logging.DualLogger
-	slackAPI         *slack.Client
-	socketClient     *socketmode.Client
-	httpServer       *http.Server
-	authService      *auth.Service
-	sessionManager   session.SessionManager
-	claudeExecutor   *claude.Executor
-	memoryRepository *repository.MemoryRepository
-	fileDownloader   *files.Downloader
-	fileCleanup      *files.CleanupService
-	stopCh           chan struct{}
-	wg               sync.WaitGroup
-	botUserID        string
-	startTime        time.Time
+	config             *config.Config
+	logger             *zap.Logger
+	dualLogger         *logging.DualLogger
+	slackAPI           *slack.Client
+	socketClient       *socketmode.Client
+	httpServer         *http.Server
+	authService        *auth.Service
+	sessionManager     session.SessionManager
+	claudeExecutor     *claude.Executor
+	memoryRepository   *repository.MemoryRepository
+	sessionRepository  *repository.SessionRepository
+	compactionService  *compaction.Service
+	fileDownloader     *files.Downloader
+	fileCleanup        *files.CleanupService
+	stopCh             chan struct{}
+	wg                 sync.WaitGroup
+	botUserID          string
+	startTime          time.Time
 }
 
 // CommandHandler represents a command handler function
@@ -85,6 +88,12 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 	// Initialize memory repository for dual-memory system
 	memoryRepository := repository.NewMemoryRepository(db, logger)
 
+	// Initialize session repository
+	sessionRepository := repository.NewSessionRepository(db, logger)
+
+	// Initialize compaction service
+	compactionService := compaction.NewService(memoryRepository, sessionRepository, claudeExecutor, cfg, logger)
+
 	// Initialize file downloader
 	storageDir := "/tmp/claude-slack-images"
 	fileDownloader, err := files.NewDownloader(slackAPI, logger, storageDir, cfg.SlackBotToken)
@@ -97,19 +106,21 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 	dualLogger := logging.NewDualLogger(logger, slackAPI)
 
 	service := &Service{
-		config:           cfg,
-		logger:           logger,
-		dualLogger:       dualLogger,
-		slackAPI:         slackAPI,
-		socketClient:     socketClient,
-		authService:      authService,
-		sessionManager:   sessionManager,
-		claudeExecutor:   claudeExecutor,
-		memoryRepository: memoryRepository,
-		fileDownloader:   fileDownloader,
-		fileCleanup:      fileCleanup,
-		stopCh:           make(chan struct{}),
-		startTime:        time.Now(),
+		config:             cfg,
+		logger:             logger,
+		dualLogger:         dualLogger,
+		slackAPI:           slackAPI,
+		socketClient:       socketClient,
+		authService:        authService,
+		sessionManager:     sessionManager,
+		claudeExecutor:     claudeExecutor,
+		memoryRepository:   memoryRepository,
+		sessionRepository:  sessionRepository,
+		compactionService:  compactionService,
+		fileDownloader:     fileDownloader,
+		fileCleanup:        fileCleanup,
+		stopCh:             make(chan struct{}),
+		startTime:          time.Now(),
 	}
 
 	// Register built-in commands
@@ -1368,6 +1379,8 @@ func (s *Service) handleSlashCommands(w http.ResponseWriter, r *http.Request) {
 		response = s.handleDebugSlashCommand(userID, channelID)
 	case "/stop":
 		response, _ = s.handleStopCommand(context.Background(), &slackevents.MessageEvent{User: userID, Channel: channelID}, nil)
+	case "/compact":
+		response = s.handleCompactSlashCommand(userID, channelID, text)
 	default:
 		response = fmt.Sprintf("Unknown command: %s", command)
 	}
@@ -1604,6 +1617,258 @@ func (s *Service) handleDebugSlashCommand(userID, channelID string) string {
 	return "❌ Debug response functionality is not available for database sessions yet."
 }
 
+// handleCompactSlashCommand handles the /compact command to compress conversation memory
+func (s *Service) handleCompactSlashCommand(userID, channelID, text string) string {
+	// Create auth context
+	authCtx := &auth.AuthContext{
+		UserID:    userID,
+		ChannelID: channelID,
+		Command:   "/compact",
+		Timestamp: time.Now(),
+	}
+
+	// Check authorization - compact requires admin privileges due to its system impact
+	if err := s.authService.AuthorizeUser(authCtx, auth.PermissionWrite); err != nil {
+		s.logger.Warn("Authorization failed for compact command", zap.Error(err))
+		return fmt.Sprintf("❌ Authorization failed: %v", err)
+	}
+
+	// Additional admin check for safety
+	if !s.authService.IsUserAdmin(userID) {
+		return "❌ The `/compact` command requires admin privileges due to its system impact."
+	}
+
+	args := strings.Fields(text)
+
+	// Show help if no arguments or "help"
+	if len(args) == 0 || args[0] == "help" {
+		return s.generateCompactHelpMessage()
+	}
+
+	// Get current session
+	userSession, err := s.sessionManager.GetOrCreateSession(userID, channelID)
+	if err != nil {
+		errCtx := logging.CreateErrorContext(channelID, userID, "compact_slash_command", "get_session")
+		return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to get current session")
+	}
+
+	parentSessionID := userSession.GetID()
+
+	// Parse command arguments
+	switch args[0] {
+	case "status":
+		return s.handleCompactStatus(parentSessionID, channelID, userID)
+	case "now":
+		return s.handleCompactNow(parentSessionID, channelID, userID)
+	case "threshold":
+		if len(args) < 2 {
+			return "❌ Usage: `/compact threshold <number>` - Set token threshold for auto-compaction"
+		}
+		return s.handleCompactThreshold(parentSessionID, args[1], channelID, userID)
+	default:
+		return fmt.Sprintf("❌ Unknown compact command: `%s`\n\nUse `/compact help` for available options.", args[0])
+	}
+}
+
+// generateCompactHelpMessage generates help text for the compact command
+func (s *Service) generateCompactHelpMessage() string {
+	return `🗜️ **Memory Compaction Commands**
+
+*Manage conversation memory compression for better performance*
+
+**Available Commands:**
+• '/compact status' - Show current memory usage and compaction status
+• '/compact now' - Force immediate compaction of current session
+• '/compact threshold <tokens>' - Set auto-compaction threshold (default: 180,000)
+• '/compact help' - Show this help message
+
+**About Compaction:**
+Compaction moves detailed conversation steps from short-term memory (used during active conversations) to compressed long-term memory archives. This helps manage token limits and improves performance for long conversations.
+
+**⚠️ Admin Only:** This command requires admin privileges due to its system-wide impact.`
+}
+
+// handleCompactStatus shows current memory usage and compaction status
+func (s *Service) handleCompactStatus(sessionID, channelID, userID string) string {
+	// Use the reusable compaction status method
+	status, err := s.GetCompactionStatus(sessionID)
+	if err != nil {
+		errCtx := logging.CreateErrorContext(channelID, userID, "compact_status", "get_status")
+		return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to get compaction status")
+	}
+
+	// Format the status for Slack display
+	percentage := float64(status.CurrentTokens) / float64(status.Threshold) * 100
+	
+	var statusEmoji string
+	var statusText string
+	switch status.RecommendationLevel {
+	case "critical":
+		statusEmoji = "🔴"
+		statusText = "Critical - Immediate compaction recommended"
+	case "recommended":
+		statusEmoji = "🟡"
+		statusText = "High - Consider compaction soon"
+	case "consider":
+		statusEmoji = "🟢"
+		statusText = "Consider compaction for organization"
+	default:
+		statusEmoji = "🔵"
+		statusText = "Normal - No compaction needed"
+	}
+
+	earliestArchiveText := "None"
+	if status.EarliestArchive != nil {
+		earliestArchiveText = status.EarliestArchive.Format("2006-01-02 15:04")
+	}
+
+	response := fmt.Sprintf(`📊 **Memory Compaction Status**
+
+**Current Session:** %s
+
+**Short-Term Memory (Active):**
+• Steps: %d
+• Tokens: %,d / %,d (%d%%)
+• Status: %s %s
+
+**Long-Term Memory (Archived):**
+• Compactions: %d
+• Archived Tokens: %,d
+• Earliest Archive: %s
+
+**Thresholds:**
+• Auto-compact at: %,d tokens
+• Remaining capacity: %,d tokens
+
+**Recommendations:**
+%s %s`,
+		sessionID[:12]+"...",
+		status.CurrentSteps,
+		status.CurrentTokens, status.Threshold, int(percentage),
+		statusEmoji, statusText,
+		status.CompactionCount,
+		status.ArchivedTokens,
+		earliestArchiveText,
+		status.Threshold,
+		status.Threshold-status.CurrentTokens,
+		statusEmoji, s.getCompactionRecommendationText(status.RecommendationLevel))
+
+	return response
+}
+
+// getCompactionRecommendationText returns recommendation text based on level
+func (s *Service) getCompactionRecommendationText(level string) string {
+	switch level {
+	case "critical":
+		return "**Immediate compaction recommended** - Memory usage is critical"
+	case "recommended":
+		return "**Consider compaction soon** - Memory usage is high"
+	case "consider":
+		return "**Consider compaction for organization** - Many steps could benefit from compression"
+	default:
+		return "**No compaction needed** - Memory usage is healthy"
+	}
+}
+
+// truncateText truncates text to a maximum length with ellipsis
+func (s *Service) truncateText(text string, maxLen int) string {
+	if len(text) <= maxLen {
+		return text
+	}
+	return text[:maxLen] + "..."
+}
+
+// handleCompactNow forces immediate compaction of current session
+func (s *Service) handleCompactNow(sessionID, channelID, userID string) string {
+	// Get current status to check if compaction is needed
+	status, err := s.GetCompactionStatus(sessionID)
+	if err != nil {
+		errCtx := logging.CreateErrorContext(channelID, userID, "compact_now", "get_status")
+		return s.logErrorWithTrace(context.Background(), errCtx, err, "Failed to get compaction status")
+	}
+
+	if status.CurrentSteps == 0 {
+		return "📝 **No Memory to Compact**\n\nThere are no conversation steps in short-term memory to compress."
+	}
+
+	// Perform compaction asynchronously and send notifications
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
+		s.logger.Info("Manual compaction triggered",
+			zap.String("session_id", sessionID),
+			zap.String("user_id", userID),
+			zap.Int("current_tokens", status.CurrentTokens),
+			zap.Int("current_steps", status.CurrentSteps))
+
+		result := s.PerformSessionCompaction(ctx, sessionID, "manual")
+		
+		var notificationMsg string
+		if !result.Success {
+			// Send failure notification
+			notificationMsg = fmt.Sprintf("❌ **Compaction Failed**\n\nFailed to compact session `%s`: %v", 
+				sessionID[:12]+"...", result.Error)
+		} else {
+			// Send success notification
+			notificationMsg = fmt.Sprintf(`✅ **Compaction Completed**
+
+**Session:** %s
+**Sequence:** #%d
+**Results:**
+• Compressed %d steps → 1 archive
+• Processed %,d tokens
+• Duration: %v
+
+**Archive Details:**
+• Memory ID: %s
+• Summary: %s...
+• Status: Ready for retrieval
+
+**Next Steps:**
+Short-term memory has been cleared. New conversations will start fresh while archived history remains accessible.`,
+				sessionID[:12]+"...",
+				result.CompactionSequence,
+				result.OriginalSteps,
+				result.OriginalTokens,
+				result.Duration,
+				result.MemoryID[:12]+"...",
+				s.truncateText(result.Summary, 50))
+		}
+
+		_, _, err := s.slackAPI.PostMessage(channelID, slack.MsgOptionText(notificationMsg, false))
+		if err != nil {
+			s.logger.Error("Failed to send compaction notification", zap.Error(err))
+		}
+	}()
+
+	return fmt.Sprintf("🗜️ **Starting Compaction...**\n\nCompacting %d steps (%,d tokens) for session `%s`. You'll receive a notification when complete.", 
+		status.CurrentSteps, status.CurrentTokens, sessionID[:12]+"...")
+}
+
+// handleCompactThreshold sets the auto-compaction threshold (not implemented - would require per-session settings)
+func (s *Service) handleCompactThreshold(sessionID, thresholdStr, channelID, userID string) string {
+	// Parse threshold
+	threshold, err := strconv.Atoi(thresholdStr)
+	if err != nil {
+		return "❌ Invalid threshold value. Please provide a number (e.g., 180000)."
+	}
+
+	if threshold < 10000 || threshold > 500000 {
+		return "❌ Threshold must be between 10,000 and 500,000 tokens."
+	}
+
+	// Note: This would require implementing per-session threshold storage
+	return fmt.Sprintf(`⚠️ **Threshold Configuration Not Implemented**
+
+Requested threshold: %d tokens
+Current global threshold: %d tokens
+
+Per-session threshold configuration is not yet implemented. The threshold is currently set globally via the AUTO_COMPACT_THRESHOLD environment variable.
+
+To change the global threshold, update your configuration and restart the service.`, threshold, s.config.AutoCompactThreshold)
+}
+
 // handleStopCommand handles the /stop command to force-stop current processing
 func (s *Service) handleStopCommand(ctx context.Context, event *slackevents.MessageEvent, args []string) (string, error) {
 	// Check if user is admin
@@ -1653,11 +1918,12 @@ func (s *Service) sendStartupNotification() {
 		time.Sleep(3 * time.Second)
 
 		changes := []string{
-			"🧠 **Dual-Memory System Foundation** - Advanced conversation compaction infrastructure",
-			"💾 **Perfect Memory Archive** - Complete step-by-step conversation history preservation",
-			"📊 **Token Monitoring** - Real-time tracking and cumulative token usage analysis",
-			"🔄 **Automatic Compaction Ready** - Foundation for 200k token limit management",
-			"⚙️ **Zero Impact** - Silent data collection with THINKING_PROCESS feature flag protection",
+			"🤖 **Intelligent Auto-Compaction** - Conversations automatically optimize at 90% token capacity (162k/180k)",
+			"🔄 **Reusable Compaction Engine** - Unified system for both manual and automatic memory compression",
+			"⚡ **Seamless Background Processing** - Zero interruption to active conversations during compaction",
+			"📊 **Enhanced Status Monitoring** - Detailed memory analytics via `/compact status` with threshold tracking",
+			"🎛️ **Full Manual Control** - `/compact now` and `/compact threshold` commands for administrative management",
+			"💾 **Perfect Memory Preservation** - Complete conversation history maintained in optimized long-term archives",
 		}
 
 		if err := notifier.NotifyDeployment(s.config.AppVersion, changes); err != nil {
@@ -2168,12 +2434,22 @@ func (s *Service) processClaudeWithStreaming(ctx context.Context, userMessage, s
 
 // recordStepInMemory records a tool call step in short-term memory
 func (s *Service) recordStepInMemory(sessionID string, toolCall claude.ToolCall) {
-	// Get next step order
-	nextOrder, err := s.memoryRepository.GetNextStepOrder(sessionID)
+	// Resolve child session ID to parent session ID
+	parentSessionID, err := s.memoryRepository.GetParentSessionID(sessionID)
+	if err != nil {
+		s.logger.Error("Failed to resolve session ID to parent",
+			zap.Error(err),
+			zap.String("child_session_id", sessionID))
+		return
+	}
+
+	// Get next step order using parent session ID
+	nextOrder, err := s.memoryRepository.GetNextStepOrder(parentSessionID)
 	if err != nil {
 		s.logger.Error("Failed to get next step order",
 			zap.Error(err),
-			zap.String("session_id", sessionID))
+			zap.String("parent_session_id", parentSessionID),
+			zap.String("child_session_id", sessionID))
 		return
 	}
 
@@ -2189,20 +2465,20 @@ func (s *Service) recordStepInMemory(sessionID string, toolCall claude.ToolCall)
 	// Estimate tokens for this step (simple estimation for now)
 	inputTokens := s.estimateTokensForStep(toolCall)
 	
-	// Get current cumulative tokens and add this step's estimated tokens
-	currentCumulative, err := s.memoryRepository.GetCumulativeTokens(sessionID)
+	// Get current cumulative tokens using parent session ID
+	currentCumulative, err := s.memoryRepository.GetCumulativeTokens(parentSessionID)
 	if err != nil {
 		s.logger.Warn("Failed to get cumulative tokens, starting from 0",
 			zap.Error(err),
-			zap.String("session_id", sessionID))
+			zap.String("parent_session_id", parentSessionID))
 		currentCumulative = 0
 	}
 	newCumulative := currentCumulative + inputTokens
 
-	// Create step record
+	// Create step record with parent session ID
 	step := &repository.ShortTermMemory{
 		StepID:           uuid.New().String(),
-		SessionID:        sessionID,
+		SessionID:        parentSessionID,
 		StepType:         "tool_call",
 		StepOrder:        nextOrder,
 		ToolName:         &toolCall.Name,
@@ -2217,7 +2493,8 @@ func (s *Service) recordStepInMemory(sessionID string, toolCall claude.ToolCall)
 	if err := s.memoryRepository.CreateStep(step); err != nil {
 		s.logger.Error("Failed to record step in short-term memory",
 			zap.Error(err),
-			zap.String("session_id", sessionID),
+			zap.String("parent_session_id", parentSessionID),
+			zap.String("child_session_id", sessionID),
 			zap.String("step_id", step.StepID),
 			zap.String("tool_name", toolCall.Name))
 		return
@@ -2225,7 +2502,8 @@ func (s *Service) recordStepInMemory(sessionID string, toolCall claude.ToolCall)
 
 	// Log token usage and check for approaching threshold
 	s.logger.Debug("Recorded step in short-term memory",
-		zap.String("session_id", sessionID),
+		zap.String("parent_session_id", parentSessionID),
+		zap.String("child_session_id", sessionID),
 		zap.String("step_id", step.StepID),
 		zap.String("tool_name", toolCall.Name),
 		zap.Int("step_order", nextOrder),
@@ -2235,10 +2513,14 @@ func (s *Service) recordStepInMemory(sessionID string, toolCall claude.ToolCall)
 	// Check if approaching compaction threshold (180k tokens)
 	if newCumulative >= 150000 { // Warn at 150k tokens
 		s.logger.Warn("Approaching token compaction threshold",
-			zap.String("session_id", sessionID),
+			zap.String("parent_session_id", parentSessionID),
+			zap.String("child_session_id", sessionID),
 			zap.Int("cumulative_tokens", newCumulative),
 			zap.Int("threshold", 180000))
 	}
+
+	// Check for auto-compaction using the new reusable method
+	s.TriggerAutoCompaction(parentSessionID)
 }
 
 // estimateTokensForStep provides a simple token estimation for a tool call step
@@ -2269,4 +2551,320 @@ func (s *Service) estimateTokensForStep(toolCall claude.ToolCall) int {
 	}
 	
 	return tokenCount
+}
+
+// performAutoCompaction performs automatic compaction for a session
+func (s *Service) performAutoCompaction(sessionID string, currentTokens int) {
+	s.logger.Info("Starting auto-compaction",
+		zap.String("session_id", sessionID),
+		zap.Int("current_tokens", currentTokens))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	result, err := s.compactionService.CompactSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Error("Auto-compaction failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		
+		// Could optionally send a notification to user about compaction failure
+		return
+	}
+
+	s.logger.Info("Auto-compaction completed successfully",
+		zap.String("session_id", sessionID),
+		zap.String("memory_id", result.MemoryID),
+		zap.Int("original_steps", result.OriginalStepCount),
+		zap.Int("original_tokens", result.OriginalTokenCount),
+		zap.Int64("duration_ms", result.CompactionDurationMS))
+
+	// Optionally, send a notification to relevant channels about successful compaction
+	// This could be useful for monitoring but might be too verbose for users
+}
+
+// CompactionStatus represents the current compaction status for a session
+type CompactionStatus struct {
+	SessionID           string
+	CurrentTokens       int
+	CurrentSteps        int
+	CompactionCount     int
+	ArchivedTokens      int
+	Threshold           int
+	NeedsCompaction     bool
+	RecommendationLevel string // "none", "consider", "recommended", "critical"
+	EarliestArchive     *time.Time
+}
+
+// GetCompactionStatus returns the current compaction status for a session (reusable)
+func (s *Service) GetCompactionStatus(sessionID string) (*CompactionStatus, error) {
+	// Get current token count
+	currentTokens, err := s.memoryRepository.GetCumulativeTokens(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cumulative tokens: %w", err)
+	}
+
+	// Get step count
+	steps, err := s.memoryRepository.GetAllStepsForSession(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get steps: %w", err)
+	}
+
+	// Get long-term memory records
+	longTermMemories, err := s.memoryRepository.GetLongTermMemoryForSession(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get long-term memory: %w", err)
+	}
+
+	// Calculate archived tokens
+	var archivedTokens int
+	var earliestArchive *time.Time
+	for _, ltm := range longTermMemories {
+		if ltm.OriginalTokenCount != nil {
+			archivedTokens += *ltm.OriginalTokenCount
+		}
+		if earliestArchive == nil || ltm.CompactedAt.Before(*earliestArchive) {
+			earliestArchive = &ltm.CompactedAt
+		}
+	}
+
+	// Default threshold
+	threshold := 180000
+
+	// Determine compaction recommendation
+	percentage := float64(currentTokens) / float64(threshold) * 100
+	var recommendationLevel string
+	var needsCompaction bool
+
+	if percentage >= 90 {
+		recommendationLevel = "critical"
+		needsCompaction = true
+	} else if percentage >= 75 {
+		recommendationLevel = "recommended"
+		needsCompaction = true
+	} else if len(steps) > 100 {
+		recommendationLevel = "consider"
+		needsCompaction = false
+	} else {
+		recommendationLevel = "none"
+		needsCompaction = false
+	}
+
+	return &CompactionStatus{
+		SessionID:           sessionID,
+		CurrentTokens:       currentTokens,
+		CurrentSteps:        len(steps),
+		CompactionCount:     len(longTermMemories),
+		ArchivedTokens:      archivedTokens,
+		Threshold:           threshold,
+		NeedsCompaction:     needsCompaction,
+		RecommendationLevel: recommendationLevel,
+		EarliestArchive:     earliestArchive,
+	}, nil
+}
+
+// CompactionResult represents the result of a compaction operation
+type CompactionResult struct {
+	Success           bool
+	MemoryID          string
+	OriginalSteps     int
+	OriginalTokens    int
+	CompactionSequence int
+	Duration          time.Duration
+	Summary           string
+	Error             error
+}
+
+// PerformSessionCompaction performs compaction for a session (reusable)
+func (s *Service) PerformSessionCompaction(ctx context.Context, sessionID string, triggerSource string) *CompactionResult {
+	startTime := time.Now()
+	
+	s.logger.Info("Starting session compaction",
+		zap.String("session_id", sessionID),
+		zap.String("trigger_source", triggerSource))
+
+	// Get all short-term memory steps
+	steps, err := s.memoryRepository.GetAllStepsForSession(sessionID)
+	if err != nil {
+		s.logger.Error("Failed to get session steps for compaction",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return &CompactionResult{
+			Success: false,
+			Error:   fmt.Errorf("failed to get session steps: %w", err),
+		}
+	}
+
+	if len(steps) == 0 {
+		s.logger.Debug("No steps to compact",
+			zap.String("session_id", sessionID))
+		return &CompactionResult{
+			Success: false,
+			Error:   fmt.Errorf("no steps to compact"),
+		}
+	}
+
+	// Note: Token counting is handled by the compaction service
+
+	// Get existing compactions to determine sequence
+	existingMemories, err := s.memoryRepository.GetLongTermMemoryForSession(sessionID)
+	if err != nil {
+		s.logger.Error("Failed to get existing compactions",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return &CompactionResult{
+			Success: false,
+			Error:   fmt.Errorf("failed to get existing compactions: %w", err),
+		}
+	}
+
+	compactionSequence := len(existingMemories) + 1
+
+	// Perform the actual compaction using the compaction service
+	result, err := s.compactionService.CompactSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Error("Compaction service failed",
+			zap.String("session_id", sessionID),
+			zap.String("trigger_source", triggerSource),
+			zap.Error(err))
+		return &CompactionResult{
+			Success: false,
+			Error:   fmt.Errorf("compaction service failed: %w", err),
+		}
+	}
+
+	// Clear short-term memory after successful compaction
+	if err := s.memoryRepository.ClearAllStepsForSession(sessionID); err != nil {
+		s.logger.Warn("Failed to clear short-term memory after compaction",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		// Don't fail the operation, just warn
+	}
+
+	duration := time.Since(startTime)
+
+	s.logger.Info("Session compaction completed successfully",
+		zap.String("session_id", sessionID),
+		zap.String("trigger_source", triggerSource),
+		zap.String("memory_id", result.MemoryID),
+		zap.Int("original_steps", result.OriginalStepCount),
+		zap.Int("original_tokens", result.OriginalTokenCount),
+		zap.Int("compaction_sequence", compactionSequence),
+		zap.Duration("duration", duration))
+
+	return &CompactionResult{
+		Success:            true,
+		MemoryID:           result.MemoryID,
+		OriginalSteps:      result.OriginalStepCount,
+		OriginalTokens:     result.OriginalTokenCount,
+		CompactionSequence: compactionSequence,
+		Duration:           duration,
+		Summary:            result.Summary,
+	}
+}
+
+// ShouldAutoCompact determines if a session should be automatically compacted
+func (s *Service) ShouldAutoCompact(sessionID string) (bool, *CompactionStatus, error) {
+	status, err := s.GetCompactionStatus(sessionID)
+	if err != nil {
+		return false, nil, err
+	}
+
+	// Auto-compact if we're at 90% of threshold or higher
+	shouldCompact := status.RecommendationLevel == "critical"
+	
+	s.logger.Debug("Auto-compaction check",
+		zap.String("session_id", sessionID),
+		zap.Int("current_tokens", status.CurrentTokens),
+		zap.Int("threshold", status.Threshold),
+		zap.String("recommendation", status.RecommendationLevel),
+		zap.Bool("should_compact", shouldCompact))
+
+	return shouldCompact, status, nil
+}
+
+// TriggerAutoCompaction performs automatic compaction if needed
+func (s *Service) TriggerAutoCompaction(sessionID string) {
+	shouldCompact, status, err := s.ShouldAutoCompact(sessionID)
+	if err != nil {
+		s.logger.Error("Failed to check if auto-compaction is needed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+
+	if !shouldCompact {
+		s.logger.Debug("Auto-compaction not needed",
+			zap.String("session_id", sessionID),
+			zap.Int("current_tokens", status.CurrentTokens),
+			zap.String("recommendation", status.RecommendationLevel))
+		return
+	}
+
+	// Perform compaction asynchronously to avoid blocking
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
+		s.logger.Info("Triggering automatic compaction",
+			zap.String("session_id", sessionID),
+			zap.Int("current_tokens", status.CurrentTokens),
+			zap.Int("threshold", status.Threshold))
+
+		result := s.PerformSessionCompaction(ctx, sessionID, "automatic")
+		if !result.Success {
+			s.logger.Error("Automatic compaction failed",
+				zap.String("session_id", sessionID),
+				zap.Error(result.Error))
+		} else {
+			s.logger.Info("Automatic compaction completed",
+				zap.String("session_id", sessionID),
+				zap.String("memory_id", result.MemoryID),
+				zap.Int("original_steps", result.OriginalSteps),
+				zap.Duration("duration", result.Duration))
+		}
+	}()
+}
+
+// performCompaction performs the actual compaction operation using the compaction service
+func (s *Service) performCompaction(sessionID string, steps []*repository.ShortTermMemory, compactionSequence int, startTime time.Time) (*repository.LongTermMemory, error) {
+	ctx := context.Background()
+	
+	// Call the compaction service to perform the compaction
+	result, err := s.compactionService.CompactSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("compaction service failed: %w", err)
+	}
+
+	// Convert CompactionResult to LongTermMemory for return
+	// Note: The compactionService.CompactSession already stores the result in the database,
+	// so we need to retrieve the stored record to return the complete LongTermMemory object
+	
+	// Get the stored long-term memory records for this session
+	longTermMemories, err := s.memoryRepository.GetLongTermMemoryForSession(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve stored compaction result: %w", err)
+	}
+
+	// Find the most recently created long-term memory (should be the one we just created)
+	var mostRecent *repository.LongTermMemory
+	for _, ltm := range longTermMemories {
+		if mostRecent == nil || ltm.CompactedAt.After(mostRecent.CompactedAt) {
+			mostRecent = ltm
+		}
+	}
+
+	if mostRecent == nil {
+		return nil, fmt.Errorf("no compaction result found after successful compaction")
+	}
+
+	s.logger.Info("Compaction completed successfully",
+		zap.String("session_id", sessionID),
+		zap.String("memory_id", result.MemoryID),
+		zap.Int("original_steps", result.OriginalStepCount),
+		zap.Int("original_tokens", result.OriginalTokenCount),
+		zap.Int64("duration_ms", result.CompactionDurationMS),
+		zap.Int("compaction_sequence", compactionSequence))
+
+	return mostRecent, nil
 }

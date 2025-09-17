@@ -1653,11 +1653,11 @@ func (s *Service) sendStartupNotification() {
 		time.Sleep(3 * time.Second)
 
 		changes := []string{
-			"🧠⚙️ Contextual Tool Messages - See the thinking context that led to each tool call",
-			"💭 Enhanced Understanding - From generic 'Reading file...' to 'I need to check configuration' → 'Reading config.go...'",
-			"🚀 Transparent Problem-Solving - Understand Claude's step-by-step reasoning process",
-			"📚 Educational Experience - Learn how AI approaches complex technical problems",
-			"🔄 Seamless Integration - Works alongside existing THINKING_PROCESS feature",
+			"🧠 **Dual-Memory System Foundation** - Advanced conversation compaction infrastructure",
+			"💾 **Perfect Memory Archive** - Complete step-by-step conversation history preservation",
+			"📊 **Token Monitoring** - Real-time tracking and cumulative token usage analysis",
+			"🔄 **Automatic Compaction Ready** - Foundation for 200k token limit management",
+			"⚙️ **Zero Impact** - Silent data collection with THINKING_PROCESS feature flag protection",
 		}
 
 		if err := notifier.NotifyDeployment(s.config.AppVersion, changes); err != nil {

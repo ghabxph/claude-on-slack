@@ -2,6 +2,29 @@
 
 All notable changes to claude-on-slack will be documented in this file.
 
+## [2.9.0] - 2025-09-17
+
+### Added - Dual-Memory System Foundation 🧠💾
+- **Short-Term Memory**: Ephemeral step-by-step conversation tracking with automatic compaction at 180k token threshold
+- **Long-Term Memory**: Perfect conversation archive system preserving complete context for future intelligent retrieval
+- **Token Monitoring**: Real-time cumulative token tracking per session with warning thresholds at 150k tokens
+- **Perfect Memory Architecture**: Complete tool call, input, output, and thinking context preservation in PostgreSQL
+- **Feature Flag Protection**: Data collection only active when THINKING_PROCESS feature is enabled
+
+### Technical Infrastructure
+- **Database Migration**: Added `short_term_memory` and `long_term_memory` tables with optimized indexes for performance
+- **Memory Repository**: Complete CRUD operations for step tracking and session memory management
+- **Token Estimation**: Simple character-based token counting (4 chars per token) with configurable thresholds
+- **Streaming Integration**: Seamless hook into existing tool call streaming system for zero-impact data collection
+- **PostgreSQL Optimization**: Indexed queries for fast step retrieval and cumulative token calculations
+
+### Foundation for Future Features
+- **Automatic Compaction**: Infrastructure ready for 200k token limit conversation compression
+- **Perfect Context Preservation**: Complete conversation reconstruction capabilities
+- **Intelligent Retrieval**: Rich metadata storage for future chunk-based memory access
+- **Scalable Architecture**: Handles unlimited conversation length through intelligent archival
+- **Token Growth Analysis**: Complete data collection for studying conversation token consumption patterns
+
 ## [2.8.0] - 2025-09-16
 
 ### Enhanced - Contextual Tool Messages 🧠⚙️

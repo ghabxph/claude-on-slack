@@ -244,6 +244,116 @@ func (r *MemoryRepository) GetStepByID(stepID string) (*ShortTermMemory, error) 
 	return step, nil
 }
 
+// GetParentSessionID resolves a child session ID to its parent session ID
+func (r *MemoryRepository) GetParentSessionID(childSessionID string) (string, error) {
+	query := `
+		SELECT s.session_id 
+		FROM sessions s 
+		JOIN child_sessions cs ON s.id = cs.root_parent_id 
+		WHERE cs.session_id = $1`
+
+	var parentSessionID string
+	err := r.db.GetDB().QueryRow(query, childSessionID).Scan(&parentSessionID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Try to check if it's already a parent session ID
+			checkQuery := `SELECT session_id FROM sessions WHERE session_id = $1`
+			checkErr := r.db.GetDB().QueryRow(checkQuery, childSessionID).Scan(&parentSessionID)
+			if checkErr == nil {
+				return parentSessionID, nil // It was already a parent session ID
+			}
+			return "", fmt.Errorf("session not found: %s", childSessionID)
+		}
+		return "", fmt.Errorf("failed to get parent session ID: %w", err)
+	}
+
+	return parentSessionID, nil
+}
+
+// CreateLongTermMemory inserts a new long-term memory record
+func (r *MemoryRepository) CreateLongTermMemory(memory *LongTermMemory) error {
+	query := `
+		INSERT INTO long_term_memory (
+			memory_id, session_id, compaction_sequence, original_step_range_start,
+			original_step_range_end, complete_step_data, conversation_summary, key_outcomes,
+			tools_used, files_accessed, commands_executed, errors_encountered,
+			user_inputs, ai_responses, thinking_segments, successful_operations,
+			failed_operations, conversation_topics, technologies_mentioned,
+			file_extensions_worked_with, directory_paths_accessed, original_token_count,
+			original_step_count, original_timespan_start, original_timespan_end,
+			compaction_duration_ms
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+			$17, $18, $19, $20, $21, $22, $23, $24, $25, $26
+		) RETURNING id`
+
+	err := r.db.GetDB().QueryRow(query,
+		memory.MemoryID, memory.SessionID, memory.CompactionSequence, memory.OriginalStepRangeStart,
+		memory.OriginalStepRangeEnd, memory.CompleteStepData, memory.ConversationSummary, memory.KeyOutcomes,
+		memory.ToolsUsed, memory.FilesAccessed, memory.CommandsExecuted, memory.ErrorsEncountered,
+		memory.UserInputs, memory.AIResponses, memory.ThinkingSegments, memory.SuccessfulOperations,
+		memory.FailedOperations, memory.ConversationTopics, memory.TechnologiesMentioned,
+		memory.FileExtensionsWorked, memory.DirectoryPathsAccessed, memory.OriginalTokenCount,
+		memory.OriginalStepCount, memory.OriginalTimespanStart, memory.OriginalTimespanEnd,
+		memory.CompactionDurationMS).Scan(&memory.ID)
+
+	if err != nil {
+		return fmt.Errorf("failed to create long-term memory: %w", err)
+	}
+
+	r.logger.Info("Created long-term memory record",
+		zap.String("memory_id", memory.MemoryID),
+		zap.String("session_id", memory.SessionID),
+		zap.Int("compaction_sequence", memory.CompactionSequence),
+		zap.Int("original_steps", *memory.OriginalStepCount),
+		zap.Int("original_tokens", *memory.OriginalTokenCount))
+
+	return nil
+}
+
+// GetLongTermMemoryForSession retrieves all long-term memory records for a session
+func (r *MemoryRepository) GetLongTermMemoryForSession(sessionID string) ([]*LongTermMemory, error) {
+	query := `
+		SELECT id, memory_id, session_id, compaction_sequence, original_step_range_start,
+			   original_step_range_end, complete_step_data, conversation_summary, key_outcomes,
+			   tools_used, files_accessed, commands_executed, errors_encountered,
+			   user_inputs, ai_responses, thinking_segments, successful_operations,
+			   failed_operations, conversation_topics, technologies_mentioned,
+			   file_extensions_worked_with, directory_paths_accessed, original_token_count,
+			   original_step_count, compacted_at, original_timespan_start, original_timespan_end,
+			   compaction_duration_ms
+		FROM long_term_memory 
+		WHERE session_id = $1 
+		ORDER BY compaction_sequence ASC`
+
+	rows, err := r.db.GetDB().Query(query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get long-term memory for session: %w", err)
+	}
+	defer rows.Close()
+
+	var memories []*LongTermMemory
+	for rows.Next() {
+		memory := &LongTermMemory{}
+		err := rows.Scan(
+			&memory.ID, &memory.MemoryID, &memory.SessionID, &memory.CompactionSequence,
+			&memory.OriginalStepRangeStart, &memory.OriginalStepRangeEnd, &memory.CompleteStepData,
+			&memory.ConversationSummary, &memory.KeyOutcomes, &memory.ToolsUsed, &memory.FilesAccessed,
+			&memory.CommandsExecuted, &memory.ErrorsEncountered, &memory.UserInputs, &memory.AIResponses,
+			&memory.ThinkingSegments, &memory.SuccessfulOperations, &memory.FailedOperations,
+			&memory.ConversationTopics, &memory.TechnologiesMentioned, &memory.FileExtensionsWorked,
+			&memory.DirectoryPathsAccessed, &memory.OriginalTokenCount, &memory.OriginalStepCount,
+			&memory.CompactedAt, &memory.OriginalTimespanStart, &memory.OriginalTimespanEnd,
+			&memory.CompactionDurationMS)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan long-term memory: %w", err)
+		}
+		memories = append(memories, memory)
+	}
+
+	return memories, nil
+}
+
 // Helper function to convert string pointer to string for logging
 func stringPtrToString(ptr *string) string {
 	if ptr == nil {

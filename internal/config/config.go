@@ -81,6 +81,11 @@ type Config struct {
 	// Feature flags
 	Features []string
 
+	// Auto-compaction configuration
+	AutoCompactEnabled      bool
+	AutoCompactThreshold    int
+	AutoCompactStepLimit    int
+
 	// Database configuration
 	Database                DatabaseConfig
 	EnableDatabasePersistence bool
@@ -112,6 +117,11 @@ func Load() (*Config, error) {
 		WorkingDirectory:       "", // Default to current directory - set in .env
 		CommandTimeout:         time.Minute * 5,
 		MaxOutputLength:        10000,
+		// Auto-compaction defaults
+		AutoCompactEnabled:   false, // Disabled by default, enable via environment
+		AutoCompactThreshold: 180000, // 180k tokens
+		AutoCompactStepLimit: 1000,   // 1000 steps
+
 		// Database defaults
 		Database: DatabaseConfig{
 			Host:            "localhost",
@@ -123,7 +133,7 @@ func Load() (*Config, error) {
 			MaxLifetime:     time.Hour,
 		},
 		EnableDatabasePersistence: false,
-		AppVersion:               "2.9.0",
+		AppVersion:               "2.10.0",
 	}
 
 	// Load required environment variables
@@ -346,6 +356,28 @@ func Load() (*Config, error) {
 		// Trim whitespace from each feature
 		for i, feature := range cfg.Features {
 			cfg.Features[i] = strings.TrimSpace(feature)
+		}
+	}
+
+	// Auto-compaction configuration
+	if val := os.Getenv("AUTO_COMPACT_ENABLED"); val != "" {
+		cfg.AutoCompactEnabled, err = strconv.ParseBool(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid AUTO_COMPACT_ENABLED: %v", err)
+		}
+	}
+
+	if val := os.Getenv("AUTO_COMPACT_THRESHOLD"); val != "" {
+		cfg.AutoCompactThreshold, err = strconv.Atoi(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid AUTO_COMPACT_THRESHOLD: %v", err)
+		}
+	}
+
+	if val := os.Getenv("AUTO_COMPACT_STEP_LIMIT"); val != "" {
+		cfg.AutoCompactStepLimit, err = strconv.Atoi(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid AUTO_COMPACT_STEP_LIMIT: %v", err)
 		}
 	}
 

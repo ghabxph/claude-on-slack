@@ -202,6 +202,28 @@ func (r *MemoryRepository) ClearAllStepsForSession(sessionID string) error {
 	return nil
 }
 
+// ClearStepsExceptType removes all steps for a session except those of a specific type
+func (r *MemoryRepository) ClearStepsExceptType(sessionID string, preserveType string) error {
+	query := `DELETE FROM short_term_memory WHERE session_id = $1 AND step_type != $2`
+
+	result, err := r.db.GetDB().Exec(query, sessionID, preserveType)
+	if err != nil {
+		return fmt.Errorf("failed to clear steps except type: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	r.logger.Info("Cleared short-term memory for session (preserving type)",
+		zap.String("session_id", sessionID),
+		zap.String("preserved_type", preserveType),
+		zap.Int64("steps_cleared", rowsAffected))
+
+	return nil
+}
+
 // UpdateCumulativeTokens updates the cumulative token count for a specific step
 func (r *MemoryRepository) UpdateCumulativeTokens(stepID string, cumulativeTokens int) error {
 	query := `

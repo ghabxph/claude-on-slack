@@ -2733,9 +2733,17 @@ func (s *Service) PerformSessionCompaction(ctx context.Context, sessionID string
 		}
 	}
 
-	// Clear short-term memory after successful compaction
-	if err := s.memoryRepository.ClearAllStepsForSession(sessionID); err != nil {
-		s.logger.Warn("Failed to clear short-term memory after compaction",
+	// Inject context summary into short-term memory to preserve conversation awareness
+	if err := s.injectCompactionContext(sessionID, result); err != nil {
+		s.logger.Warn("Failed to inject compaction context",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		// Continue with clearing - context injection failure shouldn't stop compaction
+	}
+
+	// Clear original short-term memory after successful compaction (context summary will remain)
+	if err := s.clearCompactedSteps(sessionID, result.MemoryID); err != nil {
+		s.logger.Warn("Failed to clear compacted steps from short-term memory",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		// Don't fail the operation, just warn
@@ -2867,4 +2875,70 @@ func (s *Service) performCompaction(sessionID string, steps []*repository.ShortT
 		zap.Int("compaction_sequence", compactionSequence))
 
 	return mostRecent, nil
+}
+
+// injectCompactionContext adds a context summary step to short-term memory to preserve conversation awareness
+func (s *Service) injectCompactionContext(sessionID string, result *compaction.CompactionResult) error {
+	// Get next step order for the context injection
+	nextOrder, err := s.memoryRepository.GetNextStepOrder(sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get next step order: %w", err)
+	}
+
+	// Create a context preservation step with the intelligent summary
+	contextContent := fmt.Sprintf(`## 📚 Conversation Context (Auto-Compacted)
+
+**Previous conversation compacted** - %d steps with %d tokens archived to preserve memory.
+
+%s
+
+**Key Outcomes:**
+%s
+
+---
+*This summary preserves context from the compacted conversation. You can continue working with full awareness of previous tasks and decisions.*`,
+		result.OriginalStepCount,
+		result.OriginalTokenCount,
+		result.Summary,
+		result.KeyOutcomes)
+
+	// Create the context step
+	contextStep := &repository.ShortTermMemory{
+		StepID:           fmt.Sprintf("context_%s_%d", result.MemoryID, time.Now().Unix()),
+		SessionID:        sessionID,
+		StepType:         "compaction_context",
+		StepOrder:        nextOrder,
+		Content:          &contextContent,
+		InputTokens:      0, // Context injection doesn't count as input tokens
+		OutputTokens:     0, // Will be calculated when next step is added
+		CumulativeTokens: 0, // Will be recalculated when next step is added
+	}
+
+	// Store the context step
+	if err := s.memoryRepository.CreateStep(contextStep); err != nil {
+		return fmt.Errorf("failed to create context step: %w", err)
+	}
+
+	s.logger.Info("Injected compaction context into short-term memory",
+		zap.String("session_id", sessionID),
+		zap.String("memory_id", result.MemoryID),
+		zap.String("context_step_id", contextStep.StepID),
+		zap.Int("original_steps", result.OriginalStepCount))
+
+	return nil
+}
+
+// clearCompactedSteps removes the original conversation steps while preserving the context summary
+func (s *Service) clearCompactedSteps(sessionID, memoryID string) error {
+	// Use selective clearing to preserve compaction_context steps
+	err := s.memoryRepository.ClearStepsExceptType(sessionID, "compaction_context")
+	if err != nil {
+		return fmt.Errorf("failed to selectively clear steps: %w", err)
+	}
+
+	s.logger.Info("Cleared compacted steps while preserving context",
+		zap.String("session_id", sessionID),
+		zap.String("memory_id", memoryID))
+
+	return nil
 }

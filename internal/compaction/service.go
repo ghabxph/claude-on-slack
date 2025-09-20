@@ -308,12 +308,31 @@ func (s *Service) extractMetadata(steps []*repository.ShortTermMemory) *Metadata
 
 // generateSummary generates a conversation summary using Claude
 func (s *Service) generateSummary(ctx context.Context, steps []*repository.ShortTermMemory) (string, string, error) {
-	// Use Claude executor to generate summary
-	// For now, return a simple summary - this would be enhanced with actual Claude calls
-	summary := fmt.Sprintf("Conversation compacted with %d steps", len(steps))
-	keyOutcomes := "Steps compacted and preserved in long-term memory"
+	if len(steps) == 0 {
+		return "Empty conversation", "No activities recorded", nil
+	}
+
+	// Build a comprehensive conversation text for Claude to summarize
+	conversationText := s.buildConversationText(steps)
 	
-	return summary, keyOutcomes, nil
+	// Use Claude executor to generate intelligent summary
+	summary, err := s.claudeExecutor.ExecuteClaudeSummary(ctx, conversationText)
+	if err != nil {
+		s.logger.Warn("Failed to generate intelligent summary with Claude",
+			zap.Error(err),
+			zap.Int("steps_count", len(steps)))
+		return "", "", err
+	}
+	
+	// Parse the result to extract summary and key outcomes
+	summaryText, keyOutcomes := s.parseSummaryResult(summary, steps)
+	
+	s.logger.Info("Generated intelligent conversation summary",
+		zap.Int("steps_count", len(steps)),
+		zap.Int("summary_length", len(summaryText)),
+		zap.Int("outcomes_length", len(keyOutcomes)))
+	
+	return summaryText, keyOutcomes, nil
 }
 
 // generateFallbackSummary creates a basic summary when Claude generation fails
@@ -352,16 +371,93 @@ func (s *Service) generateFallbackSummary(steps []*repository.ShortTermMemory) s
 	return summary
 }
 
-// buildSummaryPrompt builds a prompt for Claude to summarize the conversation
-func (s *Service) buildSummaryPrompt(steps []*repository.ShortTermMemory) string {
-	return fmt.Sprintf(`Please summarize this conversation of %d steps, focusing on:
-1. Key tasks accomplished
-2. Main topics discussed  
-3. Files and directories worked with
-4. Important outcomes or decisions
-5. Any issues encountered
+// buildConversationText builds a comprehensive conversation text for Claude to summarize
+func (s *Service) buildConversationText(steps []*repository.ShortTermMemory) string {
+	// Analyze steps to extract key information
+	var toolsUsed []string
+	var stepDetails []string
+	
+	toolCounts := make(map[string]int)
+	
+	for i, step := range steps {
+		// Track tools used
+		if step.ToolName != nil {
+			toolCounts[*step.ToolName]++
+		}
+		
+		// Build step summary for context
+		stepNum := i + 1
+		if step.ToolName != nil {
+			stepDetail := fmt.Sprintf("Step %d: %s", stepNum, *step.ToolName)
+			if step.Content != nil && len(*step.Content) > 0 {
+				// Truncate content for prompt efficiency
+				content := *step.Content
+				if len(content) > 100 {
+					content = content[:100] + "..."
+				}
+				stepDetail += fmt.Sprintf(" - %s", content)
+			}
+			stepDetails = append(stepDetails, stepDetail)
+		}
+	}
+	
+	// Build tools used list
+	for tool, count := range toolCounts {
+		if count == 1 {
+			toolsUsed = append(toolsUsed, tool)
+		} else {
+			toolsUsed = append(toolsUsed, fmt.Sprintf("%s (%dx)", tool, count))
+		}
+	}
+	
+	// Create the conversation text for Claude to summarize
+	conversationText := fmt.Sprintf(`CONVERSATION TO SUMMARIZE:
 
-Provide a concise but comprehensive summary.`, len(steps))
+Total Steps: %d
+Tools Used: %s
+Time Period: Recent conversation segment
+
+STEP-BY-STEP BREAKDOWN:
+%s
+
+This conversation will be compacted to preserve memory. The summary should maintain context awareness for future interactions.`,
+		len(steps),
+		strings.Join(toolsUsed, ", "),
+		strings.Join(stepDetails, "\n"))
+	
+	return conversationText
+}
+
+// parseSummaryResult extracts summary and key outcomes from Claude's response
+func (s *Service) parseSummaryResult(summary string, steps []*repository.ShortTermMemory) (string, string) {
+	if summary == "" {
+		// Fallback to basic summary
+		return s.generateFallbackSummary(steps), "Summary generation failed - using fallback"
+	}
+	
+	// Extract key outcomes by looking for specific sections
+	keyOutcomes := "Key tasks completed and preserved in long-term memory"
+	
+	// Try to extract the "KEY TASKS COMPLETED" section if present
+	if strings.Contains(summary, "## KEY TASKS COMPLETED") {
+		parts := strings.Split(summary, "## KEY TASKS COMPLETED")
+		if len(parts) > 1 {
+			// Extract everything until the next ## section or end
+			keyTasksSection := parts[1]
+			if nextSection := strings.Index(keyTasksSection, "## "); nextSection != -1 {
+				keyTasksSection = keyTasksSection[:nextSection]
+			}
+			keyOutcomes = strings.TrimSpace(keyTasksSection)
+		}
+	}
+	
+	// Ensure summary isn't too long for storage
+	maxSummaryLength := 10000 // Reasonable limit for summary storage
+	if len(summary) > maxSummaryLength {
+		summary = summary[:maxSummaryLength] + "\n\n[Summary truncated for storage efficiency]"
+	}
+	
+	return summary, keyOutcomes
 }
 
 // storeLongTermMemory stores the compacted memory using the repository
